@@ -1,0 +1,33 @@
+version: 1
+rules:
+  - id: CHOMP-001
+    name: Execution from a temporary directory
+    description: Demonstration heuristic; legitimate installers can also match.
+    severity: medium
+    detection:
+      all:
+        - field: event.type
+          op: equals
+          value: process_start
+      any:
+        - field: process.executable
+          op: starts_with
+          value: /tmp/
+        - field: process.executable
+          op: starts_with
+          value: /var/tmp/
+  - id: CHOMP-002
+    name: Sensitive account file modified
+    severity: high
+    detection:
+      all:
+        - field: event.type
+          op: equals
+          value: file_write
+      any:
+        - field: file.path
+          op: equals
+          value: /etc/shadow
+        - field: file.path
+          op: equals
+          value: /etc/passwd

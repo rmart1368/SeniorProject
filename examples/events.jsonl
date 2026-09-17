@@ -1,0 +1,3 @@
+{"timestamp":"2026-09-17T12:00:00Z","host":"lab-host","event":{"type":"process_start"},"process":{"pid":101,"executable":"/usr/bin/ls"}}
+{"timestamp":"2026-09-17T12:00:01Z","host":"lab-host","event":{"type":"process_start"},"process":{"pid":102,"executable":"/tmp/demo"}}
+{"timestamp":"2026-09-17T12:00:02Z","host":"lab-host","event":{"type":"file_write"},"file":{"path":"/etc/shadow"}}
