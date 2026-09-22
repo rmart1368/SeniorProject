@@ -1,5 +1,6 @@
 use chomp_edr::Engine;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
@@ -21,18 +22,23 @@ struct Cli {
 enum Command {
     /// Validate the YAML schema and compile every detection rule.
     Validate {
-        #[arg(short, long)]
-        rules: PathBuf,
+        #[command(flatten)]
+        source: RuleSource,
     },
     /// List validated rule IDs, severity, and enabled status.
     ListRules {
-        #[arg(short, long)]
-        rules: PathBuf,
+        #[command(flatten)]
+        source: RuleSource,
+        #[arg(short, long, value_enum, default_value = "text")]
+        format: Format,
     },
     /// Evaluate JSON Lines events from a file or stdin; emit matching alerts.
     Scan {
-        #[arg(short, long)]
-        rules: PathBuf,
+        #[command(flatten)]
+        source: RuleSource,
+        /// Select an exact rule ID; repeat to select multiple rules.
+        #[arg(long = "rule")]
+        rule_ids: Vec<String>,
         /// JSON Lines input path; '-' reads stdin.
         #[arg(short, long, default_value = "-")]
         input: PathBuf,
@@ -44,13 +50,20 @@ enum Command {
     },
 }
 
+#[derive(Args)]
+struct RuleSource {
+    /// YAML file or directory (nonrecursive); repeat to load multiple sources.
+    #[arg(short, long, required = true)]
+    rules: Vec<PathBuf>,
+}
+
 #[derive(Clone, Copy, ValueEnum)]
 enum Format {
     Json,
     Text,
 }
 
-fn load(path: PathBuf) -> Result<Engine, Box<dyn std::error::Error>> {
+fn load_file(path: PathBuf) -> Result<Engine, Box<dyn std::error::Error>> {
     let mut source = String::new();
     File::open(&path)?
         .take((MAX_BYTES + 1) as u64)
@@ -61,20 +74,70 @@ fn load(path: PathBuf) -> Result<Engine, Box<dyn std::error::Error>> {
     Engine::from_yaml(&source).map_err(|e| format!("{}: {e}", path.display()).into())
 }
 
+fn load(source: RuleSource) -> Result<Engine, Box<dyn std::error::Error>> {
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+    for path in source.rules {
+        let mut files = if path.is_dir() {
+            let mut files = Vec::new();
+            for entry in std::fs::read_dir(&path)? {
+                let entry = entry?;
+                let p = entry.path();
+                if entry.file_type()?.is_file()
+                    && p.extension().and_then(|s| s.to_str()).is_some_and(|s| {
+                        s.eq_ignore_ascii_case("yaml") || s.eq_ignore_ascii_case("yml")
+                    })
+                {
+                    files.push(p);
+                }
+            }
+            if files.is_empty() {
+                return Err(format!("{}: no YAML rule files", path.display()).into());
+            }
+            files.sort();
+            files
+        } else {
+            vec![path]
+        };
+        for file in files.drain(..) {
+            let canonical = file.canonicalize()?;
+            if seen.insert(canonical) {
+                paths.push(file);
+            }
+        }
+    }
+    let mut engines = Vec::new();
+    for path in paths {
+        engines.push(load_file(path)?);
+    }
+    Engine::combine(engines).map_err(Into::into)
+}
+
 fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
     let mut out = io::BufWriter::new(io::stdout().lock());
     match cli.command {
-        Command::Validate { rules } => {
-            let engine = load(rules)?;
+        Command::Validate { source } => {
+            let engine = load(source)?;
             writeln!(out, "Valid: {} rule(s)", engine.rules().count())?;
         }
-        Command::ListRules { rules } => {
-            let engine = load(rules)?;
+        Command::ListRules { source, format } => {
+            let engine = load(source)?;
             for r in engine.rules() {
+                if matches!(format, Format::Json) {
+                    serde_json::to_writer(
+                        &mut out,
+                        &serde_json::json!({
+                            "id": r.id, "name": r.name, "description": r.description,
+                            "severity": r.severity, "enabled": r.enabled
+                        }),
+                    )?;
+                    writeln!(out)?;
+                    continue;
+                }
                 writeln!(
                     out,
                     "{}\t{:?}\t{}\t{}",
-                    r.id,
+                    serde_json::to_string(&r.id)?,
                     r.severity,
                     if r.enabled { "enabled" } else { "disabled" },
                     serde_json::to_string(&r.name)?
@@ -82,12 +145,14 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
             }
         }
         Command::Scan {
-            rules,
+            source,
+            rule_ids,
             input,
             format,
             fail_on_alert,
         } => {
-            let engine = load(rules)?;
+            let mut engine = load(source)?;
+            engine.select(&rule_ids)?;
             let mut reader: Box<dyn BufRead> = if input.as_os_str() == "-" {
                 Box::new(BufReader::new(io::stdin()))
             } else {

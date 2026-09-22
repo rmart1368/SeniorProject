@@ -1,5 +1,5 @@
 //! Stateless detection over normalized JSON events. No endpoint actions are executed.
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
@@ -46,6 +46,8 @@ struct Detection {
     all: Vec<Condition>,
     #[serde(default)]
     any: Vec<Condition>,
+    #[serde(default)]
+    none: Vec<Condition>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,6 +56,8 @@ struct Condition {
     field: String,
     op: Operator,
     value: Option<Value>,
+    #[serde(default)]
+    ignore_case: bool,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -80,6 +84,9 @@ impl CompiledCondition {
             return Err("condition field must be a nonempty dotted path".into());
         }
         match c.op {
+            Operator::Exists if c.ignore_case => {
+                return Err("exists does not support ignore_case".into())
+            }
             Operator::Exists if c.value.is_some() => return Err("exists must omit value".into()),
             Operator::Exists => (),
             _ if c
@@ -98,8 +105,22 @@ impl CompiledCondition {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned();
-        let regex = if matches!(c.op, Operator::Regex) {
-            Some(Regex::new(&value).map_err(|e| format!("invalid regex: {e}"))?)
+        let regex = if matches!(c.op, Operator::Regex) || c.ignore_case {
+            let escaped = regex::escape(&value);
+            let pattern = match c.op {
+                Operator::Equals => format!(r"\A{escaped}\z"),
+                Operator::StartsWith => format!(r"\A{escaped}"),
+                Operator::EndsWith => format!(r"{escaped}\z"),
+                Operator::Contains => escaped,
+                Operator::Regex => value.clone(),
+                Operator::Exists => unreachable!(),
+            };
+            Some(
+                RegexBuilder::new(&pattern)
+                    .case_insensitive(c.ignore_case)
+                    .build()
+                    .map_err(|e| format!("invalid regex: {e}"))?,
+            )
         } else {
             None
         };
@@ -125,6 +146,9 @@ impl CompiledCondition {
         let Some(text) = current.as_str() else {
             return false;
         };
+        if let Some(regex) = &self.regex {
+            return regex.is_match(text);
+        }
         match self.op {
             Operator::Equals => text == self.value,
             Operator::Contains => text.contains(&self.value),
@@ -140,6 +164,7 @@ struct CompiledRule {
     metadata: Rule,
     all: Vec<CompiledCondition>,
     any: Vec<CompiledCondition>,
+    none: Vec<CompiledCondition>,
 }
 
 pub struct Engine {
@@ -187,10 +212,13 @@ impl Engine {
                 .map_err(|e| format!("rule {}: {e}", rule.id))?;
             let any = compile(std::mem::take(&mut rule.detection.any))
                 .map_err(|e| format!("rule {}: {e}", rule.id))?;
+            let none = compile(std::mem::take(&mut rule.detection.none))
+                .map_err(|e| format!("rule {}: {e}", rule.id))?;
             rules.push(CompiledRule {
                 metadata: rule,
                 all,
                 any,
+                none,
             });
         }
         Ok(Self { rules })
@@ -198,6 +226,37 @@ impl Engine {
 
     pub fn rules(&self) -> impl Iterator<Item = &Rule> {
         self.rules.iter().map(|r| &r.metadata)
+    }
+
+    /// Combine already validated sets; IDs must be unique across every set.
+    pub fn combine(engines: impl IntoIterator<Item = Engine>) -> Result<Self> {
+        let mut rules = Vec::new();
+        let mut ids = HashSet::new();
+        for engine in engines {
+            for rule in engine.rules {
+                if !ids.insert(rule.metadata.id.clone()) {
+                    return Err(format!("duplicate rule id: {}", rule.metadata.id));
+                }
+                rules.push(rule);
+            }
+        }
+        if rules.is_empty() {
+            return Err("no rules loaded".into());
+        }
+        Ok(Self { rules })
+    }
+
+    /// Select exact IDs without enabling disabled rules. Validate all IDs first.
+    pub fn select(&mut self, ids: &[String]) -> Result<()> {
+        for id in ids {
+            if !self.rules.iter().any(|r| &r.metadata.id == id) {
+                return Err(format!("unknown rule id: {id}"));
+            }
+        }
+        if !ids.is_empty() {
+            self.rules.retain(|r| ids.contains(&r.metadata.id));
+        }
+        Ok(())
     }
 
     /// Emit all matching rules, in file order. Missing or mistyped fields never match.
@@ -211,6 +270,7 @@ impl Engine {
                 r.metadata.enabled
                     && r.all.iter().all(|c| c.matches(event))
                     && (r.any.is_empty() || r.any.iter().any(|c| c.matches(event)))
+                    && !r.none.iter().any(|c| c.matches(event))
             })
             .map(|r| Alert {
                 rule_id: &r.metadata.id,

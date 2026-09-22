@@ -119,3 +119,103 @@ fn any_only_and_multiple_alerts_are_deterministic() {
     let ids: Vec<_> = engine.evaluate(&event).iter().map(|a| a.rule_id).collect();
     assert_eq!(ids, ["test", "second"]);
 }
+
+#[test]
+fn exclusions_suppress_any_matching_exception() {
+    let yaml = format!("{}\n      none:\n        - field: user.name\n          op: equals\n          value: trusted\n        - field: process.path\n          op: starts_with\n          value: /opt/approved/", rule("exists", ""));
+    let engine = Engine::from_yaml(&yaml).unwrap();
+    for event in [
+        json!({"process":{"name":"bash"},"user":{"name":"trusted"}}),
+        json!({"process":{"name":"bash","path":"/opt/approved/task"}}),
+    ] {
+        assert!(engine.evaluate(&event).is_empty());
+    }
+    for user in [json!(null), json!(42), json!("other")] {
+        assert_eq!(
+            engine
+                .evaluate(&json!({"process":{"name":"bash"},"user":{"name":user}}))
+                .len(),
+            1
+        );
+    }
+    assert!(engine
+        .evaluate(&json!({"user":{"name":"other"}}))
+        .is_empty());
+    assert!(Engine::from_yaml(&rule("exists", "").replace("all:", "none:")).is_err());
+}
+
+#[test]
+fn case_insensitive_operators_keep_literal_and_anchor_semantics() {
+    for (op, value, positive, negative) in [
+        ("equals", "b.sh", "B.SH", "Bash"),
+        ("contains", "b.sh", "aB.SHx", "aBashx"),
+        ("starts_with", "b.sh", "B.SHx", "xB.SH"),
+        ("ends_with", "b.sh", "xB.SH", "B.SH\n"),
+        ("regex", "^b.sh$", "BASH", "XBASH"),
+        ("equals", "é", "É", "e"),
+    ] {
+        let yaml = rule(
+            op,
+            &format!("          value: '{value}'\n          ignore_case: true"),
+        );
+        let engine = Engine::from_yaml(&yaml).unwrap();
+        assert_eq!(
+            engine.evaluate(&json!({"process":{"name":positive}})).len(),
+            1,
+            "{op}"
+        );
+        assert!(
+            engine
+                .evaluate(&json!({"process":{"name":negative}}))
+                .is_empty(),
+            "{op}"
+        );
+        assert!(engine.evaluate(&json!({"process":{"name":42}})).is_empty());
+    }
+    assert!(Engine::from_yaml(&rule("exists", "          ignore_case: true")).is_err());
+    let sensitive = Engine::from_yaml(&rule("equals", "          value: bash")).unwrap();
+    assert!(sensitive
+        .evaluate(&json!({"process":{"name":"BASH"}}))
+        .is_empty());
+}
+
+#[test]
+fn combines_validate_global_ids_and_preserve_order() {
+    let first = rule("exists", "");
+    let second = first.replace("id: test", "id: second");
+    let engine = Engine::combine([
+        Engine::from_yaml(&second).unwrap(),
+        Engine::from_yaml(&first).unwrap(),
+    ])
+    .unwrap();
+    assert_eq!(
+        engine.rules().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+        ["second", "test"]
+    );
+    assert!(Engine::combine([
+        Engine::from_yaml(&first).unwrap(),
+        Engine::from_yaml(&first).unwrap()
+    ])
+    .is_err());
+    assert!(Engine::combine([]).is_err());
+}
+
+#[test]
+fn selection_is_atomic_and_respects_disabled_rules() {
+    let first = rule("exists", "");
+    let second = first
+        .replace("id: test", "id: second")
+        .replace("    name:", "    enabled: false\n    name:");
+    let mut engine = Engine::combine([
+        Engine::from_yaml(&first).unwrap(),
+        Engine::from_yaml(&second).unwrap(),
+    ])
+    .unwrap();
+    assert!(engine.select(&["test".into(), "unknown".into()]).is_err());
+    assert_eq!(engine.rules().count(), 2);
+    engine.select(&["second".into(), "second".into()]).unwrap();
+    assert_eq!(engine.rules().count(), 1);
+    assert!(engine
+        .evaluate(&json!({"process":{"name":"bash"}}))
+        .is_empty());
+}
