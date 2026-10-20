@@ -5,3 +5,5 @@
 /.chomp-state/
 
 /dist/
+__pycache__/
+*.py[cod]

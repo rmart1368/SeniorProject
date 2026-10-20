@@ -24,7 +24,7 @@ chompedr watch-processes -r rules/processes.yaml --interval-ms 500
 chompedr scan -r rules/processes.yaml -i process-events.jsonl
 ```
 
-`--interval-ms` accepts 100..60000 milliseconds; the delay is between snapshots, so actual observation cadence also includes scan time. `--samples N` counts the initial baseline. `--events` cannot be combined with `-r`; pipe or save those events and use `scan` for custom evaluation. Stop with Ctrl+C. Live commands run outside the interactive Chomp prompt. This command is separate from the SSH `monitor` command and the optional SSH user service.
+`--interval-ms` accepts 100..60000 milliseconds; the delay is between snapshots, so actual observation cadence also includes scan time. `--samples N` counts the initial baseline. `--events` cannot be combined with `-r`; pipe or save those events and use `scan` for custom evaluation. Stop with Ctrl+C. This command is separate from the SSH `monitor` command and the optional SSH user service.
 
 ## Event fields
 

@@ -1,5 +1,7 @@
 # Linux installation and optional user service
 
+For boot startup, logout-independent monitoring, and automatic restarts of SSH, process and file collectors, use the [always-on system installation](system-service.md). The user-service instructions below cover SSH only and retain manual restart behavior.
+
 Requirements: Linux, Python 3 for installation, and a locally built `chompedr` binary. Live monitoring also requires systemd/journalctl and an account with access to the SSH journal. This installer does not grant access, install dependencies, edit shell startup files, or change system services.
 
 ## Install from the repository

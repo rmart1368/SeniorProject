@@ -24,7 +24,7 @@ chompedr scan -r rules/file-watch.yaml -i file-events.jsonl
 
 Repeat `--path` to select 1..64 absolute paths. Parent (`..`) components are rejected; paths are not canonicalized through symlinks. Duplicate identical paths are watched once. Files can be absent at startup; their later creation is detected. Directories are traversed recursively, including subdirectories created after the baseline. Files in newly added or removed subtrees produce individual created/removed events. Overlapping roots produce one event per path. Directory metadata itself does not emit events. Explicit device/socket/FIFO paths are rejected; these special files inside a directory are skipped. Other metadata-access errors stop monitoring rather than being misreported as removal.
 
-`--interval-ms` is 100..60000 ms, default 1000. The delay is between snapshots and excludes scan time. `--samples` includes the initial baseline, which never emits alerts. `--events` conflicts with custom `-r` rules; pipe or save raw events for custom scanning. Stop foreground monitoring with Ctrl+C. Use the system terminal rather than the interactive Chomp prompt.
+`--interval-ms` is 100..60000 ms, default 1000. The delay is between snapshots and excludes scan time. `--samples` includes the initial baseline, which never emits alerts. `--events` conflicts with custom `-r` rules; pipe or save raw events for custom scanning. Stop foreground monitoring with Ctrl+C. Run commands in your system terminal.
 
 ## Event meaning
 

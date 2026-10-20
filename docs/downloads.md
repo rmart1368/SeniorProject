@@ -42,13 +42,19 @@ On Linux/macOS:
 ./chompedr
 ```
 
-The interactive prompt opens. To try the supplied synthetic SSH demo, enter:
+Running without arguments prints help and exits. To try the supplied synthetic SSH demo on Linux/macOS:
 
-```text
-scan -r rules/ssh.yaml -i examples/ssh-demo.log --input-format ssh -f text
+```sh
+./chompedr scan -r rules/ssh.yaml -i examples/ssh-demo.log --input-format ssh -f text
 ```
 
-Expect two alerts. Type `exit` to return to the system terminal. Live collection remains Linux-only:
+On Windows:
+
+```powershell
+.\\chompedr.exe scan -r rules/ssh.yaml -i examples/ssh-demo.log --input-format ssh -f text
+```
+
+Expect two alerts. Live collection remains Linux-only:
 
 ```sh
 ./chompedr monitor

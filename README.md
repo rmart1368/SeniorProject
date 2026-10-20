@@ -25,6 +25,8 @@ Last updated: **2026-10-20**. Current phase: **Linux SSH, process, and selected-
 
 ### Verification status
 
+The latest CLI update removes interactive mode and updates its regression tests. Execution of these updated tests is pending; the recorded results below describe earlier checks.
+
 | Check | Latest result | Evidence / remaining work |
 | --- | --- | --- |
 | Windows build | Passed locally | Rust stable 1.98.1 |
@@ -63,7 +65,7 @@ Dates below are the original pitch targets, not revised delivery commitments. Ow
 | --- | --- | --- | --- |
 | 2026-10-01 | Skeleton code and project design | Team | Rust skeleton implemented; broader EDR architecture remains open |
 | 2026-10-22 | Configurable rule engine | Jake | Stateless matching and grouped time-window thresholds implemented; all three CI platforms pass |
-| 2026-10-22 | CLI compatibility | Raymon | Interactive prompt, rule management, and SSH/journal input pass all three CI platforms |
+| 2026-10-22 | CLI compatibility | Raymon | Command-based rule management and SSH/journal input; interactive prompt removed |
 | 2026-10-22 | Robust default rule set | Jake | Two starter, two SSH, and two process review rules; representative-data tuning remains pending |
 | 2026-11-01 | OS compatibility and quality-of-life improvements; optional UI start | Raymon (OS), Michael (UI) | Portable core and Ubuntu SSH/journal integration verified; deployment and optional GUI pending |
 | 2026-11-12 | Finalized product | Team | Pending collection, detection coverage, response implementation, and end-to-end validation |
@@ -100,6 +102,24 @@ When updating this tracker, change the date, check off only completed work, reco
 
 The CI workflow packages native Windows, Linux, and macOS executables with rules, sample events, documentation, and checksums. Rust is not required to run a downloaded build. See the [download guide](docs/downloads.md) for choosing an architecture, finding artifacts, and running the demo. These are unsigned development snapshots with a 14-day artifact retention period.
 
+## Web dashboard
+
+A local read-only dashboard shows retained alerts, bundled rule YAML, collector status and diagnostics. It runs as a separate unprivileged system service on the VM and can be viewed from a desktop over an SSH tunnel. See the [dashboard installation and access guide](docs/dashboard.md); existing service installations need the updated binary for embedded-rule export.
+
+## Always-on Linux services
+
+Run SSH, process and selected-file collectors in the background, starting at boot and restarting automatically after unexpected exits:
+
+```sh
+cargo build --release --locked
+sudo python3 scripts/install-system-linux.py
+sudo systemctl daemon-reload
+sudo systemctl enable --now chompedr.target
+sudo systemctl status chompedr-ssh chompedr-processes chompedr-files
+```
+
+These system services run as root and default to watching account-file metadata. See the [system-service guide](docs/system-service.md) for custom watched paths, logs, crash/reboot checks, upgrades and recovery limits. The installer writes files; the explicit systemctl commands activate monitoring.
+
 ## Linux installation
 
 Build on Linux and install into your user account:
@@ -129,7 +149,7 @@ chompedr monitor
 
 This uses built-in SSH rules, includes the last 60 seconds on first start, then follows new records. Checkpoints default to `$XDG_STATE_HOME/chomp-edr/ssh` or `$HOME/.local/state/chomp-edr/ssh`. Stop with Ctrl+C and run the same command to resume. Alerts are JSON on stdout; lifecycle messages and collector diagnostics go to stderr.
 
-Use `monitor --once` to catch up and exit, `--checkpoint DIRECTORY` to choose state storage, or `-r FILE` to choose rules. This command must run in the system terminal, outside the interactive Chomp prompt. On Windows/macOS, use `scan` with exported logs. See the [monitor guide](docs/ssh-demo.md#managed-monitor-command) for limitations.
+Use `monitor --once` to catch up and exit, `--checkpoint DIRECTORY` to choose state storage, or `-r FILE` to choose rules. Run this command in your system terminal. On Windows/macOS, use `scan` with exported logs. See the [monitor guide](docs/ssh-demo.md#managed-monitor-command) for limitations.
 
 ### Check monitoring progress
 
@@ -137,7 +157,7 @@ Use `monitor --once` to catch up and exit, `--checkpoint DIRECTORY` to choose st
 chompedr monitor --status
 ```
 
-Status reports checkpoint use, saved progress, queued alerts, and the last correlation timestamp as JSON. It does not start collection or alter progress. Use the same `--checkpoint` and `-r` options as your monitor. It is also available inside the interactive prompt as `monitor --status`. A checkpoint lock is not a collector-health guarantee.
+Status reports checkpoint use, saved progress, queued alerts, and the last correlation timestamp as JSON. It does not start collection or alter progress. Use the same `--checkpoint` and `-r` options as your monitor. A checkpoint lock is not a collector-health guarantee.
 
 ## Restart recovery
 
@@ -155,23 +175,23 @@ Loading the entire `rules` directory now includes threshold rules and requires t
 
 ## Quick start
 
-The main command is now `chompedr`. Running it without arguments shows the Chomp EDR title, ASCII gator, version, and available commands, then stays in an interactive `chompedr>` prompt. Type commands without the executable name. Use `exit` or `quit` to return to the system shell; EOF also closes the session. It does not start a background monitor. The original `chomp` command remains available for compatibility.
+Run commands directly from your system terminal. Running `chompedr` without arguments prints help and exits successfully; it does not read stdin or open a prompt. The `chomp` alias works the same way.
 
 ```sh
-chompedr
-chompedr scan -r rules -i examples/events.jsonl -f text
+chompedr --help
+chompedr validate -r rules
+chompedr list-rules
+chompedr scan -r rules/starter.yaml -i examples/events.jsonl -f text
 ```
 
-Inside the prompt, try `validate -r rules`, `list-rules`, or `scan -r rules -i examples/events.jsonl -f text`. `help` lists commands. Commands run one at a time and rules reload on each command. Failed commands report errors without closing the session. Quote paths containing spaces with single or double quotes; backslashes remain literal. Shell operators, variable expansion, and command execution are not supported. Interactive scans require `-i FILE`, because the prompt owns stdin; use the existing one-line scan command from the system shell for piped events. Each command line is limited to 8 KiB; exceeding that limit ends the session with an error.
-
-The banner appears only when no arguments are supplied. Scans, JSON output, `--help`, and `--version` remain free of the banner. Rule and event paths are relative to the current directory; the startup screen works from any directory.
+Rule and event paths are relative to your current directory. Your system shell handles quoting and pipelines.
 
 Install stable Rust with Cargo, then run these commands from the repository root:
 
 ```sh
 cargo build --locked
 cargo run -- validate --rules rules/starter.yaml
-cargo run -- list-rules --rules rules/starter.yaml
+cargo run -- list-rules
 cargo run -- scan --rules rules/starter.yaml --input examples/events.jsonl
 cargo run -- scan --rules rules/starter.yaml --input examples/events.jsonl --format text
 ```

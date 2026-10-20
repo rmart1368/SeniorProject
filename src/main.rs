@@ -1,5 +1,5 @@
 use chomp_edr::Engine;
-use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
@@ -79,6 +79,8 @@ enum Command {
         #[arg(short, long, value_enum, default_value = "text")]
         format: Format,
     },
+    /// Export embedded rule metadata and original YAML as one JSON document.
+    ExportRules,
     /// Evaluate JSON Lines events from a file or stdin; emit matching alerts.
     Scan {
         #[arg(long, value_enum, default_value = "json")]
@@ -251,6 +253,36 @@ fn list_internal_rules(
     Ok(())
 }
 
+/// Always inspect compiled defaults, even when a rules directory exists beside the binary.
+fn export_embedded_rules(out: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
+    let mut files = Vec::new();
+    for (file, yaml) in BUNDLED_RULES {
+        let engine = Engine::from_yaml(yaml)?;
+        let rules: Vec<_> = engine
+            .rules()
+            .map(|r| {
+                serde_json::json!({
+                    "id": r.id, "name": r.name, "description": r.description,
+                    "severity": r.severity, "enabled": r.enabled,
+                    "threshold": r.threshold.as_ref().map(|t| serde_json::json!({
+                        "count": t.count, "window_seconds": t.window_seconds,
+                        "group_by": t.group_by
+                    }))
+                })
+            })
+            .collect();
+        files.push(serde_json::json!({"file": file, "yaml": yaml, "rules": rules}));
+    }
+    serde_json::to_writer(
+        &mut *out,
+        &serde_json::json!({
+            "version": env!("CARGO_PKG_VERSION"), "source": "embedded", "files": files
+        }),
+    )?;
+    writeln!(out)?;
+    Ok(())
+}
+
 fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
     let mut out = io::BufWriter::new(io::stdout().lock());
     match cli.command {
@@ -331,6 +363,7 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
                     .map_err(|e| format!("monitor: {e}"))?;
             }
         }
+        Command::ExportRules => export_embedded_rules(&mut out)?,
         Command::ListRules { format } => {
             list_internal_rules(&mut out, format)?;
         }
@@ -465,12 +498,12 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
 }
 
 fn main() -> std::process::ExitCode {
-    let result = if std::env::args_os().len() == 1 {
-        interactive()
+    let cli = if std::env::args_os().len() == 1 {
+        Cli::parse_from(["chompedr", "--help"])
     } else {
-        run(Cli::parse())
+        Cli::parse()
     };
-    match result {
+    match run(cli) {
         Ok(code) => code.into(),
         Err(e) => {
             if e.downcast_ref::<io::Error>()
@@ -480,123 +513,6 @@ fn main() -> std::process::ExitCode {
             }
             eprintln!("chompedr: {e}");
             2.into()
-        }
-    }
-}
-
-fn welcome() -> Result<(), Box<dyn std::error::Error>> {
-    let mut out = io::stdout().lock();
-    write!(out, "{}", include_str!("banner.txt"))?;
-    writeln!(
-        out,
-        "Version {} | Ready to scan supplied events.",
-        env!("CARGO_PKG_VERSION")
-    )?;
-    writeln!(out, "Live endpoint monitoring is not enabled.\n")?;
-    Cli::command().write_help(&mut out)?;
-    writeln!(out, "\n\nInteractive commands: help, exit, quit")?;
-    writeln!(out, "Scans in this prompt require an input file (-i FILE).")?;
-    writeln!(out, "Example (from the project folder):")?;
-    writeln!(out, "  scan -r rules -i examples/events.jsonl -f text")?;
-    out.flush()?;
-    Ok(())
-}
-
-/// Split command arguments without invoking a shell. Backslashes remain literal
-/// so Windows paths work; single and double quotes group arguments with spaces.
-fn command_words(line: &str) -> Result<Vec<String>, &'static str> {
-    let mut words = Vec::new();
-    let mut word = String::new();
-    let mut quote = None;
-    let mut started = false;
-    for ch in line.chars() {
-        if let Some(delimiter) = quote {
-            if ch == delimiter {
-                quote = None;
-            } else {
-                word.push(ch);
-            }
-        } else if ch == '\'' || ch == '"' {
-            quote = Some(ch);
-            started = true;
-        } else if ch.is_whitespace() {
-            if started {
-                words.push(std::mem::take(&mut word));
-                started = false;
-            }
-        } else {
-            word.push(ch);
-            started = true;
-        }
-    }
-    if quote.is_some() {
-        return Err("unclosed quote; put paths containing spaces inside matching quotes");
-    }
-    if started {
-        words.push(word);
-    }
-    Ok(words)
-}
-
-fn interactive() -> Result<u8, Box<dyn std::error::Error>> {
-    welcome()?;
-    let stdin = io::stdin();
-    let mut input = stdin.lock();
-    let mut line = String::new();
-    loop {
-        print!("\nchompedr> ");
-        io::stdout().flush()?;
-        line.clear();
-        let size = input.by_ref().take(8193).read_line(&mut line)?;
-        if size == 0 {
-            println!();
-            return Ok(0);
-        }
-        if size > 8192 {
-            return Err("interactive command exceeds 8 KiB; session ended".into());
-        }
-        let words = match command_words(&line) {
-            Ok(words) => words,
-            Err(error) => {
-                eprintln!("chompedr: {error}");
-                continue;
-            }
-        };
-        if words.is_empty() {
-            continue;
-        }
-        if words.len() == 1 && matches!(words[0].as_str(), "exit" | "quit") {
-            println!("Goodbye.");
-            return Ok(0);
-        }
-        let cli = match Cli::try_parse_from(std::iter::once("chompedr".to_owned()).chain(words)) {
-            Ok(cli) => cli,
-            Err(error) => {
-                error.print()?;
-                continue;
-            }
-        };
-        if matches!(
-            &cli.command,
-            Command::Monitor { status: false, .. }
-                | Command::WatchProcesses { .. }
-                | Command::WatchFiles { .. }
-        ) {
-            eprintln!(
-                "chompedr: run live monitoring from your system terminal so Ctrl+C can stop it."
-            );
-            continue;
-        }
-        // The session owns stdin. Letting scans consume it would interpret later
-        // commands as events and can deadlock while the stdin lock is held.
-        if matches!(&cli.command, Command::Scan { input, .. } if input.as_os_str() == "-") {
-            eprintln!("chompedr: interactive scans require -i FILE. For piped events, use chompedr scan from your system shell.");
-            continue;
-        }
-        match run(cli) {
-            Ok(1) => println!("Scan completed with matching alerts (status 1)."),
-            Ok(_) => (),
-            Err(error) => eprintln!("chompedr: {error}"),
         }
     }
 }

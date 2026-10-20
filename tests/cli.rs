@@ -1,81 +1,34 @@
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
 
-fn session(commands: &str) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_chompedr"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(commands.as_bytes())
-        .unwrap();
-    child.wait_with_output().unwrap()
-}
-
 #[test]
-fn interactive_session_runs_multiple_commands_and_exits() {
-    let output = session("help\nvalidate -r rules\nlist-rules\nscan -r rules -i examples/events.jsonl -f text --fail-on-alert\nexit\ninvalid-after-exit\n");
-    assert!(output.status.success());
-    assert!(output.stderr.is_empty());
-    let text = String::from_utf8(output.stdout).unwrap();
-    assert!(text.contains("CHOMP-FILE-001"));
-    assert!(text.contains("Sensitive account file modified"));
-    assert!(text.contains("status 1"));
-    assert!(text.contains("Goodbye."));
-    assert_eq!(text.matches("Team Chomp EDR").count(), 1);
-}
-
-#[test]
-fn interactive_session_recovers_from_invalid_commands_and_stdin_scans() {
-    let output = session("\nunknown\nscan -r rules\nscan -r rules -i -\nvalidate -r missing.yaml\nvalidate -r \"unfinished\nvalidate -r rules\nquit\n");
-    assert!(output.status.success());
-    let errors = String::from_utf8(output.stderr).unwrap();
-    assert!(errors.contains("unrecognized subcommand"));
-    assert!(errors.contains("interactive scans require -i FILE"));
-    assert!(errors.contains("unclosed quote"));
-    assert!(String::from_utf8(output.stdout)
-        .unwrap()
-        .contains("CHOMP-FILE-001"));
-}
-
-#[test]
-fn interactive_session_supports_quoted_paths_and_eof() {
-    let fixture = Fixture::new();
-    let path = fixture.write("rules with spaces.yaml", &simple_rule("quoted"));
-    let output = session(&format!(
-        "validate -r \"{}\"\nvalidate -r '{}'\n",
-        path.display(),
-        path.display()
-    ));
-    assert!(output.status.success());
-    assert!(output.stderr.is_empty());
-    assert_eq!(
-        String::from_utf8(output.stdout)
-            .unwrap()
-            .matches("\"quoted\"")
-            .count(),
-        2
-    );
-}
-
-#[test]
-fn launcher_shows_banner_without_arguments_from_any_directory() {
+fn no_arguments_print_help_and_exit_without_reading_stdin() {
     for binary in [env!("CARGO_BIN_EXE_chompedr"), env!("CARGO_BIN_EXE_chomp")] {
-        let output = Command::new(binary)
+        let mut child = Command::new(binary)
             .current_dir(std::env::temp_dir())
-            .output()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .unwrap();
+        // Keep stdin open: a no-argument invocation must not wait for commands or EOF.
+        let _input = child.stdin.take().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while child.try_wait().unwrap().is_none() {
+            if std::time::Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("no-argument invocation waited for interactive input");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let output = child.wait_with_output().unwrap();
         assert!(output.status.success());
         assert!(output.stderr.is_empty());
         let text = String::from_utf8(output.stdout).unwrap();
-        assert!(text.contains("Team Chomp EDR"));
-        assert!(text.contains("00"));
         assert!(text.contains("Commands:"));
+        assert!(text.contains("scan"));
+        assert!(!text.contains("chompedr>"));
     }
 }
 

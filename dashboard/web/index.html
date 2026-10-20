@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Chomp EDR · Operations</title>
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="/app.js"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="Chomp EDR home">
+      <svg viewBox="0 0 40 44" fill="none" aria-hidden="true"><path d="M20 2 37 9v13c0 10-8 17-17 20C11 39 3 32 3 22V9L20 2Z" stroke="currentColor" stroke-width="2.5"/><path d="m11 17 5 5 4-5 4 5 5-5M12 28h16" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/></svg>
+      <span>CHOMP<span class="brand-sub">ENDPOINT DEFENSE</span></span>
+    </a>
+    <div class="workspace"><span class="workspace-icon">C</span><div>Competition lab<small id="sidebar-host">Connecting to endpoint…</small></div></div>
+    <p class="nav-caption">WORKSPACE</p>
+    <nav aria-label="Dashboard sections">
+      <button class="nav-item selected" data-view="alerts" aria-current="page"><span aria-hidden="true">◈</span>Alerts<span id="nav-count" class="nav-count">—</span></button>
+      <button class="nav-item" data-view="rules"><span aria-hidden="true">▤</span>Detection rules</button>
+      <button class="nav-item" data-view="collectors"><span aria-hidden="true">▦</span>Collectors</button>
+      <button class="nav-item" data-view="logs"><span aria-hidden="true">≡</span>Diagnostics</button>
+    </nav>
+    <div class="sidebar-bottom"><span class="read-only">READ ONLY</span><p>Visibility for your blue team.</p><small id="version">Chomp EDR</small></div>
+  </aside>
+  <div class="main-shell">
+    <header class="topbar"><div class="breadcrumb">Workspace <span>/</span> <strong id="breadcrumb">Alerts</strong></div><div class="connection"><span class="dot" id="connection-dot"></span><span id="connection-label">Connecting</span></div></header>
+    <main>
+      <div class="page-heading"><div><div class="eyebrow">ENDPOINT OPERATIONS</div><h1 id="page-title">Alert activity</h1><p id="page-description">Investigate detections from your competition endpoint.</p></div><div class="heading-actions"><button id="pause" class="button">Pause refresh</button><button id="refresh" class="button primary">↻ Refresh</button></div></div>
+      <div id="errors" class="notice" role="status" hidden></div>
+      <div class="metrics">
+        <article class="metric"><span>Retained alerts</span><strong id="metric-alerts">—</strong><small>Retained alerts · last 24 hours</small></article>
+        <article class="metric"><span>High &amp; critical</span><strong id="metric-high">—</strong><small>Prioritize investigation</small></article>
+        <article class="metric"><span>Active collectors</span><strong id="metric-collectors">—</strong><small>SSH · processes · files</small></article>
+        <article class="metric"><span>Bundled rules</span><strong id="metric-rules">—</strong><small>From the installed executable</small></article>
+      </div>
+
+      <section id="view-alerts" class="panel view" aria-label="Alerts">
+        <div class="panel-heading"><div><h2>Detection feed <span class="tag">24H</span></h2><p>Newest first. Select a detection to inspect its full event.</p></div><button id="export" class="button" disabled>↓ Export JSON</button></div>
+        <div class="filters"><label class="search"><span aria-hidden="true">⌕</span><input id="alert-search" type="search" placeholder="Search rules, hosts, IPs or file paths…" aria-label="Search alerts"></label><label><span class="sr-only">Severity</span><select id="severity"><option value="">All severities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label><label><span class="sr-only">Collector</span><select id="collector"><option value="">All collectors</option><option value="chompedr-ssh.service">SSH</option><option value="chompedr-processes.service">Processes</option><option value="chompedr-files.service">Files</option></select></label></div>
+        <div class="table-wrap"><table><thead><tr><th>TIME</th><th>SEVERITY</th><th>DETECTION</th><th>HOST / EVIDENCE</th><th>SOURCE</th></tr></thead><tbody id="alert-table"></tbody></table></div>
+        <div id="alert-empty" class="empty"><span>◈</span><h3>Waiting for endpoint data</h3><p>The dashboard will show real detections here.</p></div>
+        <footer class="panel-footer"><span id="alert-count">Loading alerts…</span><span>Up to 500 retained alerts · 24 hours</span></footer>
+      </section>
+
+      <section id="view-rules" class="view" aria-label="Detection rules" hidden>
+        <div class="panel-heading standalone"><div><h2>Detection library</h2><p>Compiled defaults from the installed binary. Custom service overrides appear under Collectors.</p></div><label class="search"><span aria-hidden="true">⌕</span><input id="rule-search" type="search" placeholder="Search the rule library…" aria-label="Search rules"></label></div>
+        <p class="subtle">Rule YAML is viewable below. Restart collectors after replacing the executable so running defaults match this inventory.</p>
+        <div id="rule-grid" class="rule-grid"></div>
+        <div id="rules-empty" class="empty" hidden><h3>No rules to display</h3><p>Check the rule source diagnostic or adjust your search.</p></div>
+      </section>
+
+      <section id="view-collectors" class="view" aria-label="Collectors" hidden>
+        <div class="panel-heading standalone"><div><h2>Service status</h2><p>Systemd state for this endpoint. Review diagnostics alongside the service state.</p></div></div>
+        <div id="service-grid" class="service-grid"></div>
+        <div class="note">An active service is not proof of complete telemetry. Polling can miss short activity; SSH parsing and journal access can limit detection.</div>
+      </section>
+
+      <section id="view-logs" class="panel view" aria-label="Diagnostics" hidden>
+        <div class="panel-heading"><div><h2>Collector diagnostics</h2><p>Latest 100 journal records from the three collectors, within the last 24 hours.</p></div></div>
+        <div class="filters"><label class="search"><span aria-hidden="true">⌕</span><input id="log-search" type="search" placeholder="Search diagnostic messages…" aria-label="Search diagnostics"></label></div>
+        <div id="log-list" class="log-list"></div>
+      </section>
+      <footer class="page-footer"><span><span class="dot muted"></span> Single endpoint · <span id="footer-host">—</span></span><span id="updated">Waiting for first snapshot</span></footer>
+    </main>
+  </div>
+  <dialog id="detail" aria-labelledby="detail-title"><div class="dialog-heading"><div><div class="eyebrow" id="detail-label">EVENT DETAIL</div><h2 id="detail-title">Detection</h2></div><button id="close-detail" class="button" aria-label="Close detail">✕</button></div><pre id="detail-content"></pre></dialog>
+</body>
+</html>

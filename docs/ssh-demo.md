@@ -8,7 +8,7 @@ From the repository root, build with `cargo build --release --locked`. Use `carg
 chompedr scan -r rules/ssh.yaml -i examples/ssh-demo.log --input-format ssh -f text
 ```
 
-Inside the interactive `chompedr>` prompt, omit the executable name. Expected alerts: one `CHOMP-SSH-001` alert on the fifth failure from `198.51.100.20`, and one `CHOMP-SSH-002` alert for a root login. The example uses documentation IP addresses and synthetic records, not captured production activity. One unrelated PAM line is skipped and counted on stderr. `--fail-on-alert` returns code 1 when alerts occur; errors return code 2.
+Expected alerts: one `CHOMP-SSH-001` alert on the fifth failure from `198.51.100.20`, and one `CHOMP-SSH-002` alert for a root login. The example uses documentation IP addresses and synthetic records, not captured production activity. One unrelated PAM line is skipped and counted on stderr. `--fail-on-alert` returns code 1 when alerts occur; errors return code 2.
 
 ## Linux input
 
@@ -26,7 +26,7 @@ If an existing Linux log file uses this format, scan it directly. To process new
 tail -n 0 -F /path/to/iso-dated-auth.log | chompedr scan -r rules/ssh.yaml --input-format ssh -f text
 ```
 
-Run this pipeline in the system shell, not the interactive Chomp prompt. Use an account that already has permission to read the log. `tail` is the external collector; Chomp does not configure logging, install a service, manage rotation, or maintain state across restarts. This command is an integration example, not evidence of a live-host test.
+Run this pipeline in your system shell. Use an account that already has permission to read the log. `tail` is the external collector; Chomp does not configure logging, install a service, manage rotation, or maintain state across restarts. This command is an integration example, not evidence of a live-host test.
 
 Yearless traditional syslog (`Oct 16 12:00:00 ...`) is not supported. Target authentication records with unsupported headers/methods or invalid fields stop the command with a line-numbered error. Unrelated lines are skipped; their count is reported on stderr at EOF. Blank scan lines are ignored.
 
@@ -68,7 +68,7 @@ The optional top-level `threshold` applies after a rule's normal `all`, `any`, a
 - Events must be globally nondecreasing by timestamp; equal times are allowed. Older timestamps are errors. Sort combined logs before scanning. There is no late-event buffer.
 - The window is inclusive: events exactly 60 seconds apart can count together. Millisecond precision is used.
 - An alert fires when a group reaches the threshold. While it stays at or above that threshold, subsequent matches are suppressed. It can alert again after expiration reduces the active count below the threshold.
-- Each scan starts fresh. The interactive CLI does not retain correlation state between commands. Replayed/duplicate records count again; no event deduplication is implemented.
+- Each scan starts fresh. Replayed/duplicate records count again; no event deduplication is implemented.
 - `count` must be 2..1000; `window_seconds` must be 1..86400. There must be 1..8 dotted `group_by` paths. Each matching event must supply nonempty string group values of at most 256 bytes.
 - At most 4096 active rule/group pairs are retained, each with at most `count` timestamps. Expired pairs are removed as event time advances. Exceeding capacity stops with an error rather than silently evicting detection history.
 - JSON correlation alerts include `count` (the threshold), `window_seconds`, group paths/values, and the first contributing timestamp in milliseconds. The attached original event is the event that reached the threshold, not the entire history.
@@ -137,7 +137,7 @@ Snapshots are limited to 64 MiB and rewritten for every record (twice for an ale
 
 The first start includes only the last 60 seconds of accessible SSH records, then follows new entries. This is a startup baseline, not a scan of all historical activity. Custom rules with longer windows need additional history; use the checkpoint scan command to seed the same state directory from retained journal records first. Subsequent starts probe the saved cursor against finite journal output and then resume inclusively from that cursor, avoiding an indefinite wait when history has expired. A retention race between the probe and collection is checked against the first returned record.
 
-`monitor --once` processes available records and exits. Normal monitoring stays in the foreground until Ctrl+C. Run it in your system terminal, not the Chomp interactive prompt. stdout contains only JSON alerts; stderr reports startup, resume, and collector errors. A quiet stream is not proof of journal permissions, SSH activity, or complete endpoint coverage. Access depends on the current user; Chomp neither elevates privileges nor changes journal permissions.
+`monitor --once` processes available records and exits. Normal monitoring stays in the foreground until Ctrl+C. Run it in your system terminal. stdout contains only JSON alerts; stderr reports startup, resume, and collector errors. A quiet stream is not proof of journal permissions, SSH activity, or complete endpoint coverage. Access depends on the current user; Chomp neither elevates privileges nor changes journal permissions.
 
 The collector is stopped on processing errors and when the monitor parent exits. An unexpected collector exit returns status 2; there is no automatic restart loop or background-service installation. Restart manually with the same directory. Invalid/changed rules, a locked checkpoint, and unavailable cursors fail without silently clearing saved state. Deduplicate stable alert IDs downstream as described above. Rule updates require an explicit new checkpoint decision.
 
@@ -149,7 +149,7 @@ This release supports only Linux systemd journals for live collection. Windows a
 
 Use the same custom rules and checkpoint directory as the monitor. Invalid state or changed rules returns status 2. A missing snapshot is reported as `saved_progress: false`, which can also mean a running collector has not received its first record. `active_groups` and `last_event_timestamp` reflect persisted event-time correlation, not wall-clock freshness; stateless-only rules may have no correlation timestamp. Pending counts describe committed alerts awaiting output acknowledgement. Raw event payloads and journal cursors are omitted.
 
-Unlike live collection, status works on all supported platforms and in the interactive Chomp prompt. On Windows, its default directory is `%LOCALAPPDATA%/ChompEDR/state/chomp-edr/ssh`; use `--checkpoint DIRECTORY` to inspect exported/copied state elsewhere. Status does not test whether the saved cursor is still retained by the Linux journal.
+Unlike live collection, status works on all supported platforms. On Windows, its default directory is `%LOCALAPPDATA%/ChompEDR/state/chomp-edr/ssh`; use `--checkpoint DIRECTORY` to inspect exported/copied state elsewhere. Status does not test whether the saved cursor is still retained by the Linux journal.
 
 ### Terminal alert highlighting
 
