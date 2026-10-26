@@ -189,7 +189,8 @@ LogLevel VERBOSE
                         state = Path(f"/proc/{pid}/stat").read_text().split(")", 1)[1].split()[0]
                         if state != "Z":
                             active.append(pid)
-                    except FileNotFoundError:
+                    except (FileNotFoundError, ProcessLookupError):
+                        # /proc can disappear between opening and reading after exit.
                         pass
                 if not active:
                     break
