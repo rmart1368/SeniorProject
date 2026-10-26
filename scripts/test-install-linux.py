@@ -48,6 +48,22 @@ class Installation(unittest.TestCase):
         self.assertFalse(self.config.exists())
         self.assertFalse((self.home / "systemctl-called").exists())
 
+    def test_cli_available_in_new_bash_and_profile_update_is_idempotent(self):
+        profile = self.home / ".bashrc"
+        profile.write_text("# existing user settings\n")
+        self.assertEqual(self.install().returncode, 0)
+        for name in (".profile", ".bashrc"):
+            self.assertIn("# ChompEDR command path", (self.home / name).read_text())
+        result = subprocess.run(["bash", "--noprofile", "--rcfile", str(profile),
+                                 "-ic", "chompedr --version"], env=self.env,
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("chompedr ", result.stdout)
+        before = profile.read_bytes()
+        self.assertEqual(self.install("--replace").returncode, 0)
+        self.assertEqual(profile.read_bytes(), before)
+        self.assertTrue(profile.read_text().startswith("# existing user settings"))
+
     def test_service_unit_valid_with_spaces_and_stays_disabled(self):
         result = self.install("--service")
         self.assertEqual(result.returncode, 0, result.stderr)
