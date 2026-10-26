@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 BINARY = Path(sys.argv.pop(1)).resolve(strict=True)
 SPEC = importlib.util.spec_from_file_location("system_installer", Path(__file__).with_name("install-linux.py"))
@@ -117,6 +118,48 @@ class SystemInstallation(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.install(replace=True)
         self.assertEqual(list(outside.iterdir()), [])
+
+    def test_default_install_builds_as_user_then_requests_sudo(self):
+        checkout = self.root / "checkout"
+        checkout.mkdir()
+        calls = []
+        def command(args, **kwargs):
+            calls.append(args)
+            if args[0] == "cargo":
+                binary = checkout / "target/release/chompedr"
+                binary.parent.mkdir(parents=True)
+                binary.write_bytes(BINARY.read_bytes())
+            return subprocess.CompletedProcess(args, 0)
+        with patch.object(INSTALLER, "ROOT", checkout), patch.object(INSTALLER.os, "geteuid", return_value=1000):
+            with patch.object(INSTALLER.shutil, "which", side_effect=lambda name: name):
+                with patch.object(INSTALLER.subprocess, "run", side_effect=command):
+                    with patch.object(INSTALLER, "migrate_user_install") as migrate:
+                        with patch.object(sys, "argv", ["install-linux.py", "--replace"]):
+                            INSTALLER.main()
+        self.assertEqual(calls[0][0:4], ["cargo", "build", "--release", "--locked"])
+        self.assertEqual(calls[1][0:2], ["sudo", "python3"])
+        self.assertIn("--binary", calls[1])
+        self.assertIn("--replace", calls[1])
+        migrate.assert_called_once()
+
+    def test_failed_build_never_requests_sudo(self):
+        checkout = self.root / "checkout"
+        checkout.mkdir()
+        with patch.object(INSTALLER, "ROOT", checkout), patch.object(INSTALLER.os, "geteuid", return_value=1000):
+            with patch.object(INSTALLER.shutil, "which", return_value="cargo"):
+                with patch.object(INSTALLER.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "cargo")) as run:
+                    with patch.object(sys, "argv", ["install-linux.py"]):
+                        with self.assertRaises(subprocess.CalledProcessError):
+                            INSTALLER.main()
+        self.assertEqual(run.call_count, 1)
+
+    def test_staging_main_never_builds_or_controls_services(self):
+        with patch.object(INSTALLER.subprocess, "run") as run:
+            with patch.object(sys, "argv", ["install-linux.py", "--binary", str(BINARY),
+                                           "--destdir", str(self.root)]):
+                INSTALLER.main()
+        run.assert_not_called()
+        self.assertTrue((self.root / INSTALLER.CLI_PATH.relative_to("/")).is_file())
 
     def test_invalid_binary_is_rejected(self):
         fake = self.root / "fake"
