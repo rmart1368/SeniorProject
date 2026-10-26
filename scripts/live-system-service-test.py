@@ -109,7 +109,8 @@ def main():
             except RuntimeError:
                 print("Dashboard snapshot:", json.dumps(dashboard(), indent=2), flush=True)
                 print(command("journalctl", "-u", "chompedr-dashboard", "--no-pager", "-n", "60").stdout, flush=True)
-                print(command("systemctl", "status", "chompedr-dashboard", check=False).stdout, flush=True)
+                print(command("systemctl", "status", "chompedr-dashboard", "dbus", check=False).stdout, flush=True)
+                print(command("journalctl", "-u", "dbus", "--no-pager", "-n", "30").stdout, flush=True)
                 raise
             dashboard_uid = command("ps", "-o", "uid=", "-p", str(pid("chompedr-dashboard"))).stdout.strip()
             if not dashboard_uid or dashboard_uid == "0":
