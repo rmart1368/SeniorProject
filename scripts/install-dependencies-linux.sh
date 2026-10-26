@@ -60,8 +60,8 @@ python3 --version
 cargo --version
 rustc --version
 echo
-echo "Dependencies are ready. From the repository folder, build with:"
-echo "  cargo build --release --locked"
+echo "Dependencies are ready. From the repository folder, install with:"
+echo "  python3 scripts/install-linux.py"
 echo "If cargo is unavailable in your terminal, first run:"
 echo '  export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"'
 echo "Cargo downloads the project's Rust dependencies during the build."

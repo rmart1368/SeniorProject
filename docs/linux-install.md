@@ -1,81 +1,80 @@
-# Linux installation and optional user service
+# Linux installation
 
-For boot startup, logout-independent monitoring, and automatic restarts of SSH, process and file collectors, use the [always-on system installation](system-service.md). The user-service instructions below cover SSH only and retain manual restart behavior.
+ChompEDR has one dependency script and one installer. The installer builds your
+local checkout and installs the CLI, SSH/process/file collectors and read-only web
+dashboard together. There is one installed executable, shared by the CLI and services.
 
-Requirements: Linux, Python 3 for installation, and a locally built `chompedr` binary. Live monitoring also requires systemd/journalctl and an account with access to the SSH journal. This installer does not grant access, install dependencies, edit shell startup files, or change system services.
+## Install from a clone
 
-## Install from the repository
-
-Build on the Linux machine where you will run Chomp:
+On Ubuntu/Debian with internet access, run as your regular user from the repository:
 
 ```sh
-cargo build --release --locked
+bash scripts/install-dependencies-linux.sh
 python3 scripts/install-linux.py
-export PATH="$HOME/.local/bin:$PATH"
+chompedr
+```
+
+The dependency script installs build tools, curl, CA certificates, Python 3 and
+stable Rust if missing. The installer finds Cargo in your user installation even
+if the current terminal has not picked up its PATH. Cargo downloads the locked
+Rust dependencies while building. Compilation runs without root; the installer
+then requests sudo to copy files, reload systemd, and enable/start the collectors
+and dashboard. Python 3.9+ and a Linux host with systemd/journald are required.
+Run the installer without sudo when building from source.
+
+Open http://127.0.0.1:8765 inside the Linux machine/VM. For desktop access through
+an SSH tunnel, see [dashboard access](dashboard.md).
+
+Running `chompedr` prints the original gator banner and help, then exits.
+Run commands in your normal terminal; there is no separate interactive prompt.
+Commands with arguments, including JSON output, do not print the banner.
+
+## Options
+
+- `--replace`: upgrade an existing installation. The installer builds first,
+  validates all destinations, stops installed collectors/dashboard, replaces
+  files, reloads systemd and starts/enables services again.
+- `--binary /path/to/chompedr`: skip compilation and install a native prebuilt
+  Linux executable. Extracted snapshot packages are detected automatically.
+- `--watch-path /absolute/path`: repeat to replace the default watched account
+  files. Repeat custom paths on upgrade to preserve your selection.
+- `--port 9000`: choose the dashboard's localhost port. Repeat on upgrade.
+- `--no-start`: install files and reload systemd without enabling/starting
+  services. During replacement, existing Chomp system services are stopped.
+- `--destdir /absolute/stage --binary /path/to/chompedr`: stage files only;
+  no build, root access, service changes or activation.
+
+The installer puts the shared binary at `/usr/local/lib/chomp-edr/chompedr` and
+a launcher at `/usr/local/bin/chompedr`. Standard Ubuntu PATH includes
+`/usr/local/bin`. If your shell has cached an old path, run `hash -r` or open a
+new terminal. When run as your regular user, a recognized old
+`~/.local/bin/chompedr` copy is replaced with a launcher to the shared binary.
+An old optional user SSH service is not removed automatically; disable it with
+`systemctl --user disable --now chompedr.service` if you previously enabled it.
+
+The former separate system/dashboard installers are retired. Existing system
+installations can upgrade using the same installer:
+
+```sh
+git pull
+python3 scripts/install-linux.py --replace
+chompedr
+```
+
+Each file is replaced atomically; the full installation is not transactional.
+If a write fails, correct the error and rerun with `--replace`.
+SSH checkpoints are preserved, but rule changes can require the
+[recovery procedure](ssh-demo.md#restart-recovery-journal-json-only).
+Process/file collectors establish new baselines on restart.
+
+## Verify and control
+
+```sh
 chompedr --version
-chompedr monitor --once
+chompedr list-rules
+systemctl status chompedr-ssh chompedr-processes chompedr-files chompedr-dashboard
+sudo journalctl -u chompedr-dashboard -n 30 --no-pager
 ```
 
-The executable is installed at `$HOME/.local/bin/chompedr`. The PATH command applies to the current shell; add that directory to your preferred shell configuration separately if desired. `--prefix /absolute/path` changes the installation prefix. `--binary /path/to/chompedr` selects another trusted local build. Do not use sudo: this is a user-account installation, not a system-wide installation.
-
-`monitor --once` includes the last 60 seconds on its first run. Inspect journalctl diagnostics and verify that the account can read SSH authentication records; a successful quiet scan does not establish complete journal access. Foreground monitoring is started with `chompedr monitor` and stopped with Ctrl+C.
-
-## Optional background service
-
-To install the binary and write a user service in one step:
-
-```sh
-python3 scripts/install-linux.py --service
-```
-
-If the binary is already installed, stop any active monitor and add `--replace`. The service file is written to `$XDG_CONFIG_HOME/systemd/user/chompedr.service` or `$HOME/.config/systemd/user/chompedr.service`. It records absolute binary and checkpoint paths; the checkpoint path uses the installer's `$XDG_STATE_HOME/chomp-edr/ssh` or `$HOME/.local/state/chomp-edr/ssh`. Spaces are supported. Service executable/checkpoint paths containing backslash, quote, dollar, or percent characters are rejected before installation to avoid systemd expansion ambiguity.
-
-The installer leaves the service disabled and stopped. After reviewing the generated file and checking journal access, explicitly run:
-
-```sh
-systemctl --user daemon-reload
-systemctl --user start chompedr.service
-systemctl --user status chompedr.service
-journalctl --user -u chompedr.service -f -o cat
-```
-
-The journal view includes JSON alerts and diagnostics. `chompedr monitor --status` inspects checkpoint state; it is not a replacement for the service status command. Pass the recorded `--checkpoint` directory if your current shell's state-directory environment differs from installation time. Do not run a foreground monitor against the same checkpoint while the service owns it.
-
-For optional startup with your user manager:
-
-```sh
-systemctl --user enable chompedr.service
-```
-
-User-manager lifetime depends on login/session configuration. This does not promise unattended boot monitoring, and the installer does not enable lingering. The unit uses `Restart=no`: errors remain visible until you investigate and restart it. Stopping the unit terminates its entire process group, including journalctl. The service uses a private file-creation mask and does not gain extra privileges.
-
-## Upgrade and removal
-
-Stop the service (or foreground process), build the new version, then replace the installed files:
-
-```sh
-systemctl --user stop chompedr.service
-cargo build --release --locked
-python3 scripts/install-linux.py --service --replace
-systemctl --user daemon-reload
-systemctl --user start chompedr.service
-```
-
-`--replace` replaces the generated unit as well as the binary when `--service` is selected; preserve any manual unit edits first. Each file is replaced atomically, but the pair is not a filesystem transaction. An interrupted installation can be completed by rerunning with `--replace`. Checkpoint data is never deleted or migrated. If built-in rules changed, checkpoint compatibility checks can prevent startup; review the recovery guide before explicitly choosing a new checkpoint directory.
-
-To remove a default installation:
-
-```sh
-systemctl --user disable --now chompedr.service
-rm -- "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/chompedr.service"
-systemctl --user daemon-reload
-rm -- "$HOME/.local/bin/chompedr"
-```
-
-Skip service commands if you never installed one. Substitute the actual installed paths for custom locations. Keep checkpoint data unless you deliberately want to discard the detection window and retry state.
-
-## Validation scope
-
-CI installs into disposable user directories, checks the copied binary, validates the generated unit with `systemd-analyze verify`, checks explicit upgrades, and verifies that no service-control command runs. Unit validation does not start a user service. The separate real-SSH test verifies the monitor/collector lifecycle on Ubuntu. Running the service under the target machine's user manager and validating its journal permissions remain deployment checks.
-
-References: [systemd service command syntax](https://www.freedesktop.org/software/systemd/man/systemd.service.html), [unit validation](https://www.freedesktop.org/software/systemd/man/systemd-analyze.html). See also [monitoring and recovery](ssh-demo.md).
+See [system services](system-service.md) for collector behavior and
+[the dashboard guide](dashboard.md) for browser access and diagnostics.

@@ -26,6 +26,8 @@ fn no_arguments_print_help_and_exit_without_reading_stdin() {
         assert!(output.status.success());
         assert!(output.stderr.is_empty());
         let text = String::from_utf8(output.stdout).unwrap();
+        assert_eq!(text.matches("Team Chomp EDR").count(), 1);
+        assert!(text.contains("00"));
         assert!(text.contains("Commands:"));
         assert!(text.contains("scan"));
         assert!(!text.contains("chompedr>"));

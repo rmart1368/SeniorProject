@@ -4,32 +4,21 @@ The dashboard displays the local system collectors' alerts, embedded rules, stat
 
 This version is read-only. Rules and service settings can be inspected but not edited in the browser. There are no host-response or process-control web endpoints.
 
-## Update an existing service installation
+## Install or upgrade
 
-The dashboard branch includes the existing always-on service setup. Fetch it even if your checkout was cloned with --single-branch:
-
-```sh
-git fetch origin codex/web-dashboard
-git switch --create web-dashboard FETCH_HEAD
-cargo build --release --locked
-```
-
-The updated executable adds export-rules so the dashboard can inspect its actual embedded defaults. Stop the collectors before replacing it. If you installed a previous dashboard, stop it before replacing its files too.
+The dashboard is included in the one Linux installation; no separate dashboard
+installer is required. From the repository, run as your regular user:
 
 ```sh
-sudo systemctl stop chompedr.target
-sudo python3 scripts/install-system-linux.py --replace
-sudo python3 scripts/install-dashboard-linux.py
-sudo systemctl daemon-reload
-sudo systemctl start chompedr.target
-sudo systemctl enable --now chompedr-dashboard.service
+bash scripts/install-dependencies-linux.sh
+python3 scripts/install-linux.py
 ```
 
-Repeat any custom --watch-path options on the system installer to preserve your watched-path selection; omitting them reinstates the default account-file paths. The collectors' SSH checkpoint is preserved. Restarting creates new process/file baselines and can repeat process review alerts.
-
-For a fresh installation, omit --replace and use sudo systemctl enable --now chompedr.target to enable collector startup at boot. Dashboard startup is enabled separately. Neither installer activates services itself.
-
-For a dashboard upgrade, first run sudo systemctl stop chompedr-dashboard, then install-dashboard-linux.py --replace, daemon-reload and start the dashboard again. --port 8765 selects the default port; ports 1024..65535 are supported. Repeat a custom port during upgrades.
+For an existing installation, run `python3 scripts/install-linux.py --replace`.
+This builds the updated binary, replaces all components, and starts/enables both
+collectors and dashboard. Repeat custom `--watch-path` and `--port` options on
+upgrade. Use `--no-start` to install without activation.
+See [Linux installation](linux-install.md) for details.
 
 ## Open the website
 

@@ -67,8 +67,8 @@ def main():
         files += sorted(p.relative_to(REPO) for p in (REPO / "rules").glob("*.yaml"))
         files += sorted(p.relative_to(REPO) for p in (REPO / "docs").glob("*.md"))
         if system == "linux":
-            files += [Path("scripts/install-linux.py"), Path("scripts/install-system-linux.py"),
-                      Path("scripts/install-dashboard-linux.py"), Path("dashboard/server.py")]
+            files += [Path("scripts/install-linux.py"), Path("scripts/install-dependencies-linux.sh"),
+                      Path("dashboard/server.py")]
             files += sorted(p.relative_to(REPO) for p in (REPO / "dashboard/web").iterdir() if p.is_file())
         for relative in files:
             target = package / relative
@@ -83,11 +83,11 @@ Linux/macOS: ./chompedr --help
 Demo: {'.' + chr(92) + executable if system == 'windows' else './' + executable} scan -r rules/ssh.yaml -i examples/ssh-demo.log --input-format ssh -f text
 Expected: two alerts from synthetic sample data.
 
-Linux install (Python 3 required): python3 scripts/install-linux.py --binary ./chompedr
+Linux install (Python 3 and sudo required): python3 scripts/install-linux.py --binary ./chompedr
 Live SSH collection is Linux-only. See docs/linux-install.md and docs/ssh-demo.md.
-Linux dashboard: install the system collector binary first, then python3 scripts/install-dashboard-linux.py with sudo.
+The Linux installer installs the CLI, collectors and dashboard together and starts the services.
 See docs/dashboard.md for service activation and SSH-tunnel access.
-macOS and Windows can scan exported files. Running without arguments prints help and exits.
+macOS and Windows can scan exported files. Running without arguments prints the gator banner and help, then exits.
 See docs/downloads.md for compatibility, checksums, and download instructions.
 """
         (package / "START-HERE.txt").write_text(quickstart, encoding="utf-8")

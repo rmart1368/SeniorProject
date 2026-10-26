@@ -42,7 +42,7 @@ On Linux/macOS:
 ./chompedr
 ```
 
-Running without arguments prints help and exits. To try the supplied synthetic SSH demo on Linux/macOS:
+Running without arguments prints the gator banner and help, then exits. To try the supplied synthetic SSH demo on Linux/macOS:
 
 ```sh
 ./chompedr scan -r rules/ssh.yaml -i examples/ssh-demo.log --input-format ssh -f text
@@ -66,7 +66,7 @@ For Linux user installation from the extracted package, Python 3 is required but
 python3 scripts/install-linux.py --binary ./chompedr
 ```
 
-Add `--service` only if you want the optional disabled systemd user unit. See [Linux installation](linux-install.md) for activation, upgrades, and removal. That guide's source-build commands apply to a repository checkout; skip them when using a downloaded binary.
+This requests sudo, installs the CLI, collectors and dashboard together, and starts/enables services. Add `--no-start` to leave services stopped. See [Linux installation](linux-install.md) for upgrades and options. Rust is not needed for prebuilt packages.
 
 ## Contents and compatibility
 

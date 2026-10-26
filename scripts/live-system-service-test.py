@@ -11,12 +11,9 @@ import tempfile
 import time
 from urllib.request import urlopen
 
-SPEC = importlib.util.spec_from_file_location("system_installer", Path(__file__).with_name("install-system-linux.py"))
+SPEC = importlib.util.spec_from_file_location("system_installer", Path(__file__).with_name("install-linux.py"))
 INSTALLER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(INSTALLER)
-DASH_SPEC = importlib.util.spec_from_file_location("dashboard_installer", Path(__file__).with_name("install-dashboard-linux.py"))
-DASH = importlib.util.module_from_spec(DASH_SPEC)
-DASH_SPEC.loader.exec_module(DASH)
 
 
 def command(*args, check=True):
@@ -58,9 +55,9 @@ def main():
         raise RuntimeError("Requires root on a disposable Linux systemd test host")
     binary = Path(sys.argv[1]).resolve(strict=True)
     units = [INSTALLER.UNIT_DIR / name for name in [*INSTALLER.SERVICES, "chompedr.target"]]
-    if any(p.exists() or p.is_symlink() for p in [INSTALLER.BINARY_PATH, Path("/var/lib/chomp-edr"), *units]):
+    if any(p.exists() or p.is_symlink() for p in [INSTALLER.BINARY_PATH, INSTALLER.CLI_PATH, Path("/var/lib/chomp-edr"), *units]):
         raise RuntimeError("Refusing to overwrite an existing system installation or checkpoint")
-    if DASH.UNIT.exists() or DASH.UNIT.is_symlink() or DASH.DESTINATION.exists():
+    if INSTALLER.DASHBOARD_UNIT.exists() or INSTALLER.DASHBOARD_UNIT.is_symlink() or INSTALLER.DASHBOARD_DIR.exists():
         raise RuntimeError("Refusing to overwrite an existing dashboard installation")
     written = []
     dashboard_written = []
@@ -82,8 +79,7 @@ def main():
         executable = folder / "demo-sleep"
         shutil.copy2(shutil.which("sleep"), executable)
         try:
-            written = INSTALLER.install(binary, [str(watched)])
-            dashboard_written = DASH.install(port=port)
+            written = INSTALLER.install(binary, [str(watched)], port=port)
             command("systemctl", "daemon-reload")
             command("systemctl", "enable", "--now", "chompedr.target")
             command("systemctl", "is-enabled", "chompedr.target")
@@ -126,8 +122,8 @@ def main():
             command("systemctl", "disable", "--now", "chompedr-dashboard.service", check=False)
             for path in dashboard_written:
                 path.unlink(missing_ok=True)
-            if dashboard_written:
-                shutil.rmtree(DASH.DESTINATION, ignore_errors=True)
+            if written:
+                shutil.rmtree(INSTALLER.DASHBOARD_DIR, ignore_errors=True)
             command("systemctl", "disable", "--now", "chompedr.target", check=False)
             for name in INSTALLER.SERVICES:
                 command("systemctl", "stop", name, check=False)

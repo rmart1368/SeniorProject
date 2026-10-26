@@ -17,7 +17,7 @@ jobs:
       - run: cargo +stable fmt --all -- --check
       - run: cargo +stable clippy --locked --all-targets -- -D warnings
       - run: cargo +stable test --locked
-      - name: Test Linux user installation and service unit
+      - name: Test unified Linux installation and service units
         if: runner.os == 'Linux'
         run: python3 scripts/test-install-linux.py target/debug/chompedr
       - name: Test real SSH authentication logs on Linux
@@ -29,9 +29,6 @@ jobs:
       - name: Test selected-file metadata monitoring
         if: runner.os == 'Linux'
         run: python3 scripts/live-file-test.py target/debug/chompedr
-      - name: Test system service installer and unit files
-        if: runner.os == 'Linux'
-        run: python3 scripts/test-install-system-linux.py target/debug/chompedr
       - name: Test dashboard API, adapters and staged installation
         if: runner.os == 'Linux'
         run: python3 -m unittest discover -s dashboard/tests -p 'test_*.py'
