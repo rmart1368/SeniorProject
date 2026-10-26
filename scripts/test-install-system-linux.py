@@ -25,10 +25,21 @@ class SystemInstallation(unittest.TestCase):
 
     def test_staging_and_unit_validation(self):
         written = self.install(["/tmp/example with spaces", "/etc/passwd"])
-        self.assertEqual(len(written), 5)
+        self.assertEqual(len(written), 6)
         binary = self.root / INSTALLER.BINARY_PATH.relative_to("/")
         self.assertEqual(binary.read_bytes(), BINARY.read_bytes())
         self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
+        launcher = self.root / INSTALLER.CLI_PATH.relative_to("/")
+        self.assertEqual(launcher.stat().st_mode & 0o777, 0o755)
+        # Verify argument forwarding through the PATH launcher against the same binary.
+        local_launcher = self.root / "launcher"
+        local_launcher.write_text(launcher.read_text().replace(str(INSTALLER.BINARY_PATH), str(binary)))
+        local_launcher.chmod(0o755)
+        result = subprocess.run([str(local_launcher), "--version"],
+                                capture_output=True, text=True, check=True)
+        direct = subprocess.run([str(binary), "--version"],
+                                capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout, direct.stdout)
         directory = self.root / INSTALLER.UNIT_DIR.relative_to("/")
         for name in INSTALLER.SERVICES:
             text = (directory / name).read_text()
