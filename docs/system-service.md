@@ -9,10 +9,8 @@ Requirements: Linux with systemd and journald, Python 3, and a native Chomp bina
 From the repository root:
 
 ```sh
-cargo build --release --locked
-sudo python3 scripts/install-system-linux.py
-sudo systemctl daemon-reload
-sudo systemctl enable --now chompedr.target
+bash scripts/install-dependencies-linux.sh
+python3 scripts/install-linux.py
 sudo systemctl status chompedr-ssh chompedr-processes chompedr-files
 ```
 
@@ -22,21 +20,21 @@ If the old user SSH service is running, stop and disable it first as your regula
 systemctl --user disable --now chompedr.service
 ```
 
-Skip that command if the user service was never installed. The system installer writes files but does not run systemctl, enable services, change journal permissions, or alter the existing user installation.
+Skip that command if the user service was never installed. The unified installer installs and starts the CLI, collectors and dashboard. Use --no-start to suppress activation.
 
 The default watched paths are /etc/passwd, /etc/shadow, /etc/group and /etc/gshadow. Supply repeated absolute paths to replace this selection:
 
 ```sh
-sudo python3 scripts/install-system-linux.py --watch-path /etc/passwd --watch-path /absolute/path/to/demo
+python3 scripts/install-linux.py --watch-path /etc/passwd --watch-path /absolute/path/to/demo
 ```
 
-Select at most 64 files or directories. Directories are recursive. Paths containing control characters, parent components or systemd expansion/escape syntax are rejected. Stop the target and add --replace to change an existing installation. The installer copies the binary to /usr/local/lib/chomp-edr/chompedr and writes four units into /etc/systemd/system. It rejects existing destinations unless --replace is supplied, and refuses symlink destinations or parent directories.
+Select at most 64 files or directories. Directories are recursive. Paths containing control characters, parent components or systemd expansion/escape syntax are rejected. Stop the target and add --replace to change an existing installation. The installer copies the shared binary to /usr/local/lib/chomp-edr/chompedr, adds the terminal launcher in /usr/local/bin and installs collector and dashboard units. It rejects existing destinations unless --replace is supplied, and refuses symlink destinations or parent directories.
 
 For an extracted Linux package, add `--binary ./chompedr`. For staging without root or activation, use `--destdir /absolute/staging-directory`; generated unit paths still describe the final installed system.
 
 ## Web dashboard
 
-The [read-only web dashboard](dashboard.md) displays the collectors' alerts, embedded rule sources, service status and diagnostics. Its separate unprivileged service listens on localhost and can be reached through an SSH tunnel. Rebuild/reinstall the updated binary before installing the dashboard.
+The [read-only web dashboard](dashboard.md) displays the collectors' alerts, embedded rule sources, service status and diagnostics. Its unprivileged service listens on localhost and can be reached through an SSH tunnel. It is installed together with the collectors.
 
 ## Logs and control
 
@@ -80,11 +78,7 @@ Reboot the VM when convenient and check all three service statuses again without
 Build the new binary, stop the target, replace files, reload and restart:
 
 ```sh
-cargo build --release --locked
-sudo systemctl stop chompedr.target
-sudo python3 scripts/install-system-linux.py --replace
-sudo systemctl daemon-reload
-sudo systemctl start chompedr.target
+python3 scripts/install-linux.py --replace
 ```
 
 Repeat custom --watch-path options during upgrade to retain that selection. Checkpoints are preserved. Rule changes can require the recovery procedure above. Each file is replaced atomically; an interrupted multi-file installation can be completed by rerunning with --replace.
@@ -92,9 +86,11 @@ Repeat custom --watch-path options during upgrade to retain that selection. Chec
 To remove the services and binary while preserving checkpoints:
 
 ```sh
-sudo systemctl disable --now chompedr.target
+sudo systemctl disable --now chompedr.target chompedr-dashboard.service
 sudo rm /etc/systemd/system/chompedr.target /etc/systemd/system/chompedr-ssh.service /etc/systemd/system/chompedr-processes.service /etc/systemd/system/chompedr-files.service
-sudo rm /usr/local/lib/chomp-edr/chompedr
+sudo rm /usr/local/lib/chomp-edr/chompedr /usr/local/bin/chompedr
+sudo rm /etc/systemd/system/chompedr-dashboard.service
+sudo rm -r /usr/local/lib/chomp-edr/dashboard
 sudo systemctl daemon-reload
 ```
 
@@ -102,7 +98,7 @@ sudo systemctl daemon-reload
 
 ```sh
 cargo build --locked
-python3 scripts/test-install-system-linux.py target/debug/chompedr
+python3 scripts/test-install-linux.py target/debug/chompedr
 # Only on a disposable Linux VM with systemd and no existing system Chomp installation:
 sudo python3 scripts/live-system-service-test.py target/debug/chompedr
 ```

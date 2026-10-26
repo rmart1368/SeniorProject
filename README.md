@@ -106,30 +106,23 @@ The CI workflow packages native Windows, Linux, and macOS executables with rules
 
 A local read-only dashboard shows retained alerts, bundled rule YAML, collector status and diagnostics. It runs as a separate unprivileged system service on the VM and can be viewed from a desktop over an SSH tunnel. See the [dashboard installation and access guide](docs/dashboard.md); existing service installations need the updated binary for embedded-rule export.
 
-## Always-on Linux services
-
-Run SSH, process and selected-file collectors in the background, starting at boot and restarting automatically after unexpected exits:
-
-```sh
-cargo build --release --locked
-sudo python3 scripts/install-system-linux.py
-sudo systemctl daemon-reload
-sudo systemctl enable --now chompedr.target
-sudo systemctl status chompedr-ssh chompedr-processes chompedr-files
-```
-
-These system services run as root and default to watching account-file metadata. See the [system-service guide](docs/system-service.md) for custom watched paths, logs, crash/reboot checks, upgrades and recovery limits. The installer writes files; the explicit systemctl commands activate monitoring.
-
 ## Linux installation
 
-Build on Linux and install into your user account:
+From the cloned repository, run as your regular user:
 
 ```sh
-cargo build --release --locked
+bash scripts/install-dependencies-linux.sh
 python3 scripts/install-linux.py
+chompedr
 ```
 
-Add `$HOME/.local/bin` to your PATH if needed. Add `--service` to write an optional systemd user-service file; it remains disabled and stopped. See the [installation guide](docs/linux-install.md) for startup, upgrades, journal access, and removal.
+The dependency script prepares Ubuntu/Debian. The installer builds locally,
+requests sudo, installs one shared CLI executable, and starts/enables the SSH,
+process, file and dashboard services. Open http://127.0.0.1:8765 inside the VM.
+Use `python3 scripts/install-linux.py --replace` for upgrades.
+
+See the [installation guide](docs/linux-install.md) for prebuilt packages,
+custom watched paths, ports, staging and service control.
 
 ## Selected-file monitoring
 
@@ -175,7 +168,7 @@ Loading the entire `rules` directory now includes threshold rules and requires t
 
 ## Quick start
 
-Run commands directly from your system terminal. Running `chompedr` without arguments prints help and exits successfully; it does not read stdin or open a prompt. The `chomp` alias works the same way.
+Run commands directly from your system terminal. Running `chompedr` without arguments prints the gator banner and help, then exits successfully; it does not read stdin or open a prompt. The `chomp` alias works the same way.
 
 ```sh
 chompedr --help
@@ -311,3 +304,10 @@ Tests cover operators, missing/mistyped fields, all/any/none semantics, case-ins
 Next milestones: live Linux verification and broader log support; tuning against representative real activity; explicit response policy and audited response actions.
 
 Dependency references: [Clap CLI derive documentation](https://docs.rs/clap/latest/clap/_derive/), [YAML parser](https://docs.rs/serde_yaml_ng/latest/serde_yaml_ng/), [Rust regex syntax](https://docs.rs/regex/latest/regex/#syntax).
+
+### Installation update (2026-10-26)
+
+Restored the original no-argument gator banner and consolidated Linux setup into
+one dependency script and one installer for the CLI, collectors and dashboard.
+Local staged-install checks passed; full Rust/platform and live Linux verification
+for this update are pending CI.

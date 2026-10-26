@@ -22,7 +22,6 @@ def module(name, path):
 
 
 WEB = module("dashboard", ROOT / "dashboard/server.py")
-INSTALLER = module("dashboard_installer", ROOT / "scripts/install-dashboard-linux.py")
 ALERT = {"rule_id": "CHOMP-SSH-001", "rule_name": "<script>alert(1)</script>",
          "severity": "high", "event": {"timestamp": "2026-10-20T12:00:00Z", "host": "lab"}}
 
@@ -147,34 +146,6 @@ class HttpTests(unittest.TestCase):
             self.assertEqual(raised.exception.code, 404)
             raised.exception.close()
 
-
-class InstallationTests(unittest.TestCase):
-    def test_stage_and_replace_without_activation(self):
-        with tempfile.TemporaryDirectory(prefix="chomp-dashboard-") as folder:
-            root = Path(folder)
-            written = INSTALLER.install(destdir=root)
-            self.assertEqual(len(written), 5)
-            assets = root / INSTALLER.DESTINATION.relative_to("/")
-            self.assertEqual(assets.stat().st_mode & 0o777, 0o755)
-            self.assertEqual((assets / "web").stat().st_mode & 0o777, 0o755)
-            unit = root / INSTALLER.UNIT.relative_to("/")
-            content = unit.read_text()
-            for expected in ["DynamicUser=yes", "SupplementaryGroups=systemd-journal",
-                             "ProtectSystem=strict", "Restart=always", "--port 8765"]:
-                self.assertIn(expected, content)
-            self.assertFalse((unit.parent / "multi-user.target.wants").exists())
-            with self.assertRaises(ValueError):
-                INSTALLER.install(destdir=root)
-            INSTALLER.install(port=9000, replace=True, destdir=root)
-            self.assertIn("--port 9000", unit.read_text())
-            self.assertFalse(list(root.rglob(".chomp-system-*")))
-
-    def test_invalid_port_leaves_no_installation(self):
-        with tempfile.TemporaryDirectory() as folder:
-            for port in [80, 0, 65536]:
-                with self.assertRaises(ValueError):
-                    INSTALLER.install(port=port, destdir=folder)
-            self.assertFalse(list(Path(folder).iterdir()))
 
 
 if __name__ == "__main__":

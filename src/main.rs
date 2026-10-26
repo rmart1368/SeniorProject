@@ -1,5 +1,5 @@
 use chomp_edr::Engine;
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, IsTerminal, Read, Write};
@@ -498,11 +498,22 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
 }
 
 fn main() -> std::process::ExitCode {
-    let cli = if std::env::args_os().len() == 1 {
-        Cli::parse_from(["chompedr", "--help"])
-    } else {
-        Cli::parse()
-    };
+    if std::env::args_os().len() == 1 {
+        return match Cli::command()
+            .before_help(include_str!("banner.txt"))
+            .print_help()
+        {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(error) if error.kind() == io::ErrorKind::BrokenPipe => {
+                std::process::ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("chompedr: {error}");
+                2.into()
+            }
+        };
+    }
+    let cli = Cli::parse();
     match run(cli) {
         Ok(code) => code.into(),
         Err(e) => {
