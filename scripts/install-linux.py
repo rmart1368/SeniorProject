@@ -9,6 +9,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD_DIR = Path("/usr/local/lib/chomp-edr/dashboard")
+SYSUSERS_PATH = Path("/etc/sysusers.d/chompedr.conf")
 DASHBOARD_UNIT = Path("/etc/systemd/system/chompedr-dashboard.service")
 BINARY_PATH = Path("/usr/local/lib/chomp-edr/chompedr")
 CLI_PATH = Path("/usr/local/bin/chompedr")
@@ -133,7 +134,8 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-DynamicUser=yes
+User=chompedr-dashboard
+Group=chompedr-dashboard
 SupplementaryGroups=systemd-journal
 ExecStart=/usr/bin/python3 {DASHBOARD_DIR}/server.py --binary {BINARY_PATH} --port {port}
 Restart=always
@@ -173,6 +175,10 @@ def dashboard_files(port=8765, replace=False, destdir=None):
 def installation_files(binary, paths, destdir=None, replace=False, port=8765):
     files = collector_files(binary, paths, destdir, replace)
     files += dashboard_files(port, replace, destdir)
+    root = Path("/") if destdir is None else Path(destdir).absolute()
+    account = root / SYSUSERS_PATH.relative_to("/")
+    regular_destination(account, replace)
+    files.append((account, b'u chompedr-dashboard - "ChompEDR dashboard" /nonexistent /usr/sbin/nologin\n', 0o644))
     return files
 
 
@@ -255,8 +261,8 @@ def main():
         subprocess.run(forwarded, check=True)
         migrate_user_install()
         return
-    if args.destdir is None and not shutil.which("systemctl"):
-        parser.error("systemctl is required")
+    if args.destdir is None and (not shutil.which("systemctl") or not shutil.which("systemd-sysusers")):
+        parser.error("systemctl and systemd-sysusers are required")
     files = installation_files(binary, args.watch_path or DEFAULT_PATHS,
                                args.destdir, args.replace, args.port)
     if args.destdir is None and args.replace:
@@ -270,6 +276,7 @@ def main():
     if args.destdir is not None:
         print("Staged only. No services enabled or started.")
         return
+    subprocess.run(["systemd-sysusers", str(SYSUSERS_PATH)], check=True)
     subprocess.run(["systemctl", "daemon-reload"], check=True)
     if not args.no_start:
         subprocess.run(["systemctl", "enable", "--now", "chompedr.target", "chompedr-dashboard.service"], check=True)

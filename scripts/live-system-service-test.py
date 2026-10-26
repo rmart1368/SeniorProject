@@ -80,6 +80,7 @@ def main():
         shutil.copy2(shutil.which("sleep"), executable)
         try:
             written = INSTALLER.install(binary, [str(watched)], port=port)
+            command("systemd-sysusers", str(INSTALLER.SYSUSERS_PATH))
             command("systemctl", "daemon-reload")
             command("systemctl", "enable", "--now", "chompedr.target")
             command("systemctl", "is-enabled", "chompedr.target")

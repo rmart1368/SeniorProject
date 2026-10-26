@@ -26,7 +26,7 @@ class SystemInstallation(unittest.TestCase):
 
     def test_staging_and_unit_validation(self):
         written = self.install(["/tmp/example with spaces", "/etc/passwd"])
-        self.assertEqual(len(written), 11)
+        self.assertEqual(len(written), 12)
         binary = self.root / INSTALLER.BINARY_PATH.relative_to("/")
         self.assertEqual(binary.read_bytes(), BINARY.read_bytes())
         self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
@@ -70,12 +70,14 @@ class SystemInstallation(unittest.TestCase):
                 INSTALLER.install(BINARY, destdir=self.root, port=port)
             self.assertFalse((self.root / "usr").exists())
         written = INSTALLER.install(BINARY, destdir=self.root, port=9000)
-        self.assertEqual(len(written), 11)
+        self.assertEqual(len(written), 12)
         assets = self.root / INSTALLER.DASHBOARD_DIR.relative_to("/")
         self.assertEqual((assets / "web").stat().st_mode & 0o777, 0o755)
         self.assertTrue((assets / "server.py").is_file())
+        account = self.root / INSTALLER.SYSUSERS_PATH.relative_to("/")
+        self.assertIn("u chompedr-dashboard", account.read_text())
         unit = self.root / INSTALLER.DASHBOARD_UNIT.relative_to("/")
-        for expected in ("DynamicUser=yes", "SupplementaryGroups=systemd-journal",
+        for expected in ("User=chompedr-dashboard", "SupplementaryGroups=systemd-journal",
                          "ProtectSystem=strict", "--port 9000"):
             self.assertIn(expected, unit.read_text())
         with self.assertRaises(ValueError):

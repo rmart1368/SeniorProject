@@ -58,7 +58,7 @@ sudo systemctl restart chompedr-dashboard
 sudo systemctl disable --now chompedr-dashboard
 ```
 
-Files live at /usr/local/lib/chomp-edr/dashboard and /etc/systemd/system/chompedr-dashboard.service. The web service uses a temporary unprivileged systemd identity with SupplementaryGroups=systemd-journal. That group permits reading the host journal, although the HTTP API only queries the three fixed Chomp collector units. The web process has no root service-management privileges. A strict read-only filesystem, Host/Origin checks and a same-origin content policy limit the local HTTP surface.
+Files live at /usr/local/lib/chomp-edr/dashboard and /etc/systemd/system/chompedr-dashboard.service. The web service uses a dedicated unprivileged system account with SupplementaryGroups=systemd-journal. That group permits reading the host journal, although the HTTP API only queries the three fixed Chomp collector units. The web process has no root service-management privileges. A strict read-only filesystem, Host/Origin checks and a same-origin content policy limit the local HTTP surface.
 
 The dashboard starts independently of chompedr.target and remains available to report stopped collectors. Disable or stop the dashboard separately when desired.
 
