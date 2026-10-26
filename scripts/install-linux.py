@@ -2,6 +2,8 @@
 import argparse
 import os
 from pathlib import Path
+import shlex
+import stat
 import subprocess
 import sys
 import tempfile
@@ -38,6 +40,29 @@ def atomic_write(path, data, mode):
     finally:
         if name is not None:
             os.unlink(name)
+
+
+def shell_path_updates(prefix):
+    """Persist the CLI path for Ubuntu's login and interactive Bash shells."""
+    directory = str(prefix / "bin")
+    line = "export PATH=" + shlex.quote(directory) + ':"$PATH"'
+    # Existing Bash login overrides must also receive the entry.
+    names = [".profile", ".bashrc"]
+    names += [name for name in (".bash_profile", ".bash_login", ".zshrc")
+              if (Path.home() / name).exists()]
+    updates = []
+    for name in names:
+        path = Path.home() / name
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            raise ValueError(f"Refusing nonregular shell configuration: {path}")
+        old = path.read_text() if path.exists() else ""
+        if line in old.splitlines():
+            continue
+        mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
+        text = old + ("\n" if old and not old.endswith("\n") else "")
+        text += "\n# ChompEDR command path\n" + line + "\n"
+        updates.append((path, text.encode(), mode))
+    return updates
 
 
 def main():
@@ -91,10 +116,13 @@ WantedBy=default.target
             raise ValueError(f"Already exists: {path}; stop monitoring and use --replace to upgrade")
         if path == source:
             raise ValueError("Source binary and installation destination must differ")
-    for path, data, mode in destinations:
+    profile_updates = shell_path_updates(prefix)
+    for path, data, mode in destinations + profile_updates:
         atomic_write(path, data, mode)
         print(f"Installed {path}")
-    print(f"{version}. Add {prefix / 'bin'} to your PATH if needed.")
+    print(f"{version}. CLI path configured for new Bash/login terminals.")
+    print("Open a new terminal, or run in this terminal:")
+    print("  export PATH=" + shlex.quote(str(prefix / "bin")) + ':"$PATH"')
     if args.service:
         print("Service written but NOT enabled or started. After checking journal access:")
         print("  systemctl --user daemon-reload")
