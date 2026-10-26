@@ -4,7 +4,7 @@ set -euo pipefail
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Usage: bash scripts/install-dependencies-linux.sh"
-    echo "Installs build-essential, curl, ca-certificates, Python 3 and stable Rust if missing."
+    echo "Installs build-essential, curl, ca-certificates, Python 3, D-Bus and stable Rust if missing."
     echo "Run as a regular user. Uses sudo for apt; does not build ChompEDR or start services."
     exit 0
 fi
@@ -34,9 +34,9 @@ if ! command -v sudo >/dev/null || ! command -v apt-get >/dev/null; then
     exit 1
 fi
 
-echo "Installing build tools, HTTPS certificates, curl and Python 3..."
+echo "Installing build tools, HTTPS certificates, curl Python 3 and D-Bus..."
 sudo apt-get update
-sudo apt-get install -y build-essential curl ca-certificates python3
+sudo apt-get install -y build-essential curl ca-certificates python3 dbus
 
 # Locate an existing user Rust installation even in a newly opened shell.
 export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
