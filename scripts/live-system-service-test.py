@@ -104,7 +104,13 @@ def main():
                 return ("CHOMP-FILE-001" in ids and "CHOMP-PROC-001" in ids and
                         (snapshot.get("rules") or {}).get("source") == "embedded" and
                         not snapshot.get("errors"))
-            wait_for(dashboard_has_alerts, "Dashboard could not read real alerts, services or rules")
+            try:
+                wait_for(dashboard_has_alerts, "Dashboard could not read real alerts, services or rules")
+            except RuntimeError:
+                print("Dashboard snapshot:", json.dumps(dashboard(), indent=2), flush=True)
+                print(command("journalctl", "-u", "chompedr-dashboard", "--no-pager", "-n", "60").stdout, flush=True)
+                print(command("systemctl", "status", "chompedr-dashboard", check=False).stdout, flush=True)
+                raise
             dashboard_uid = command("ps", "-o", "uid=", "-p", str(pid("chompedr-dashboard"))).stdout.strip()
             if not dashboard_uid or dashboard_uid == "0":
                 raise RuntimeError("Dashboard did not run as an unprivileged user")
