@@ -6,6 +6,7 @@ import sys
 import tempfile
 
 BINARY_PATH = Path("/usr/local/lib/chomp-edr/chompedr")
+CLI_PATH = Path("/usr/local/bin/chompedr")
 UNIT_DIR = Path("/etc/systemd/system")
 DEFAULT_PATHS = ["/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow"]
 SERVICES = ["chompedr-ssh.service", "chompedr-processes.service", "chompedr-files.service"]
@@ -103,7 +104,9 @@ def install(binary, paths, destdir=None, replace=False):
     if not data.startswith(b"\x7fELF"):
         raise ValueError("Expected a native Linux ELF executable; build on the target Linux architecture")
     generated = units(paths)
-    destinations = [(root / BINARY_PATH.relative_to("/"), data, 0o755)]
+    launcher = f'#!/bin/sh\nexec "{BINARY_PATH}" "$@"\n'.encode()
+    destinations = [(root / BINARY_PATH.relative_to("/"), data, 0o755),
+                    (root / CLI_PATH.relative_to("/"), launcher, 0o755)]
     destinations += [(root / UNIT_DIR.relative_to("/") / name, text.encode(), 0o644)
                      for name, text in generated.items()]
     for path, _, _ in destinations:
@@ -127,6 +130,7 @@ def main():
     if args.destdir is not None:
         print("Staged only. No services were enabled or started.")
         return
+    print("CLI ready: chompedr --help (ensure /usr/local/bin is on your PATH).")
     print("Installed but not started. Stop/disable any old Chomp user service before activation.")
     print("  sudo systemctl daemon-reload")
     print("  sudo systemctl enable --now chompedr.target")
