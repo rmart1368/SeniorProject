@@ -5,6 +5,7 @@ permissions:
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -16,7 +17,23 @@ jobs:
         run: node --check dashboard/web/app.js
       - run: cargo +stable fmt --all -- --check
       - run: cargo +stable clippy --locked --all-targets -- -D warnings
-      - run: cargo +stable test --locked
+      - name: Run Rust tests
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo +stable test --locked 2>&1 | tee rust-test-output.log
+      - name: Report Rust test failure details
+        if: failure()
+        shell: python
+        run: |
+          from pathlib import Path
+          log = Path("rust-test-output.log")
+          if log.exists():
+              output = log.read_text(errors="replace")
+              start = output.rfind("\nfailures:")
+              detail = output[start:] if start >= 0 else output[-12000:]
+              detail = detail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print("::error title=Rust test failure details::" + detail)
       - name: Test unified Linux installation and service units
         if: runner.os == 'Linux'
         run: python3 scripts/test-install-linux.py target/debug/chompedr
