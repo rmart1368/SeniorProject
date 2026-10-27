@@ -20,6 +20,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Review, approve or reject response actions and inspect their audit history (Linux).
+    Responses {
+        /// Override the private response state directory (default: installed system queue).
+        #[arg(long)]
+        state: Option<PathBuf>,
+        #[command(subcommand)]
+        command: ResponseCommand,
+    },
     /// Watch Linux files or recursive directories for metadata changes without reading contents.
     WatchFiles {
         /// Absolute file or directory path; directories are recursive. Repeat for up to 64 roots.
@@ -102,6 +110,79 @@ enum Command {
         #[arg(long)]
         checkpoint: Option<PathBuf>,
     },
+}
+
+#[derive(Subcommand)]
+enum ResponseCommand {
+    /// Pause an active preservation guard for legitimate maintenance.
+    Pause { id: String },
+    /// Resume preservation and capture current contents as the new baseline.
+    Resume { id: String },
+    /// Display the private browser approval token to the administrator.
+    DashboardToken,
+    /// List requests, resolved targets and execution results.
+    List,
+    /// Show response decisions and execution history.
+    Audit,
+    /// Approve a pending request for execution by the background service.
+    Approve { id: String },
+    /// Reject a pending request without execution.
+    Reject { id: String },
+}
+
+fn responses(
+    state: Option<PathBuf>,
+    command: ResponseCommand,
+) -> Result<u8, Box<dyn std::error::Error>> {
+    if !cfg!(target_os = "linux") {
+        return Err("response execution and approvals require Linux".into());
+    }
+    let executable = std::env::current_exe()?;
+    let directory = executable.parent().ok_or("executable has no parent")?;
+    let mut worker = directory.join("response/worker.py");
+    let checkout = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    // Source builds use the checkout helper; installed and packaged builds use adjacent files.
+    if !worker.is_file() && executable.starts_with(checkout.join("target")) {
+        worker = checkout.join("response/worker.py");
+    }
+    if !worker.is_file() {
+        return Err(
+            "response helper missing; install or extract the complete Chomp EDR package".into(),
+        );
+    }
+    let mut process = std::process::Command::new("python3");
+    process.arg(worker);
+    if let Some(state) = state {
+        process.arg("--state").arg(state);
+    }
+    match command {
+        ResponseCommand::Pause { id } => {
+            process.arg("pause").arg(id);
+        }
+        ResponseCommand::Resume { id } => {
+            process.arg("resume").arg(id);
+        }
+        ResponseCommand::DashboardToken => {
+            process.arg("dashboard-token");
+        }
+        ResponseCommand::List => {
+            process.arg("list");
+        }
+        ResponseCommand::Audit => {
+            process.arg("audit");
+        }
+        ResponseCommand::Approve { id } => {
+            process.arg("approve").arg(id);
+        }
+        ResponseCommand::Reject { id } => {
+            process.arg("reject").arg(id);
+        }
+    }
+    let status = process.status()?;
+    Ok(status
+        .code()
+        .and_then(|code| u8::try_from(code).ok())
+        .unwrap_or(2))
 }
 
 #[derive(Args)]
@@ -264,6 +345,7 @@ fn export_embedded_rules(out: &mut impl Write) -> Result<(), Box<dyn std::error:
                 serde_json::json!({
                     "id": r.id, "name": r.name, "description": r.description,
                     "severity": r.severity, "enabled": r.enabled,
+                    "response": r.response,
                     "threshold": r.threshold.as_ref().map(|t| serde_json::json!({
                         "count": t.count, "window_seconds": t.window_seconds,
                         "group_by": t.group_by
@@ -286,6 +368,7 @@ fn export_embedded_rules(out: &mut impl Write) -> Result<(), Box<dyn std::error:
 fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
     let mut out = io::BufWriter::new(io::stdout().lock());
     match cli.command {
+        Command::Responses { state, command } => return responses(state, command),
         Command::WatchFiles {
             paths,
             interval_ms,
@@ -375,7 +458,7 @@ fn run(cli: Cli) -> Result<u8, Box<dyn std::error::Error>> {
                         &mut out,
                         &serde_json::json!({
                             "id": r.id, "name": r.name, "description": r.description,
-                            "severity": r.severity, "enabled": r.enabled
+                            "severity": r.severity, "enabled": r.enabled, "response": r.response
                         }),
                     )?;
                     writeln!(out)?;

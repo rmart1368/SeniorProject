@@ -1,4 +1,4 @@
-"""Read-only, loopback dashboard for Chomp's Linux system services. Python 3.9+."""
+"""Loopback dashboard with authenticated response approvals. Python 3.9+."""
 import argparse
 import copy
 from datetime import datetime, timezone
@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import selectors
+import re
 import socket
 import subprocess
 import threading
@@ -14,6 +15,7 @@ import time
 from urllib.parse import urlsplit
 
 COLLECTORS = ("chompedr-ssh.service", "chompedr-processes.service", "chompedr-files.service")
+JOURNAL_UNITS = (*COLLECTORS, "chompedr-response.service")
 WEB_UNIT = "chompedr-dashboard.service"
 LIMIT = 500
 MAX_OUTPUT = 8 * 1024 * 1024
@@ -22,6 +24,27 @@ ASSETS = {
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
 }
+
+
+def response_control(path, request):
+    with socket.socket(socket.AF_UNIX) as connection:
+        connection.settimeout(5)
+        connection.connect(str(path))
+        connection.sendall(json.dumps(request).encode() + b"\n")
+        with connection.makefile("rb") as stream:
+            line = stream.readline(MAX_OUTPUT + 1)
+        if len(line) > MAX_OUTPUT:
+            raise RuntimeError("Response control output exceeded limit")
+        result = json.loads(line)
+        if "error" in result:
+            raise ControlError(result["error"], result.get("code", 503))
+        return result["result"]
+
+
+class ControlError(RuntimeError):
+    def __init__(self, message, code):
+        super().__init__(message)
+        self.code = code if code in (403, 409) else 503
 
 
 def utc_now():
@@ -69,7 +92,7 @@ def journal_args(lines, alerts_only=False):
     args = ["/usr/bin/journalctl", "--no-pager", "--all", "--output=json",
             "--since=-24h", "--lines=" + str(lines),
             "--output-fields=__CURSOR,__REALTIME_TIMESTAMP,_SYSTEMD_UNIT,MESSAGE"]
-    for unit in COLLECTORS:
+    for unit in JOURNAL_UNITS:
         args += ["--unit", unit]
     if alerts_only:
         # Filter before --lines so collector diagnostics cannot crowd out alerts.
@@ -83,7 +106,7 @@ def parse_journal(text):
         if not line.strip():
             continue
         row = json.loads(line)
-        if isinstance(row, dict) and row.get("_SYSTEMD_UNIT") in COLLECTORS:
+        if isinstance(row, dict) and row.get("_SYSTEMD_UNIT") in JOURNAL_UNITS:
             records.append(row)
     # --grep with --lines implies reverse ordering on systemd. Normalize both feeds.
     return sorted(records, key=lambda row: int(row.get("__REALTIME_TIMESTAMP", "0")), reverse=True)
@@ -122,21 +145,23 @@ def service_rows(text):
     rows = []
     for block in text.strip().split("\n\n"):
         values = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
-        if values.get("Id") in (*COLLECTORS, WEB_UNIT):
+        if values.get("Id") in (*COLLECTORS, WEB_UNIT, "chompedr-response.service"):
             rows.append(values)
     return rows
 
 
 class Snapshot:
     """One background reader; HTTP requests never spawn commands or select file paths."""
-    def __init__(self, binary, runner=run_command):
+    def __init__(self, binary, runner=run_command, response_socket=None):
         self.binary = str(binary)
+        self.response_socket = response_socket
         self.runner = runner
         self.lock = threading.Lock()
         self.stop = threading.Event()
         self.data = {
             "host": socket.gethostname(), "updated_at": None, "loading": True,
             "alerts": [], "services": [], "rules": None, "logs": [],
+            "responses": {"requests": [], "audit": [], "pending_count": 0, "limit": 500},
             "errors": [], "sources": {},
             "window": {"hours": 24, "alert_limit": LIMIT, "log_limit": 100},
         }
@@ -150,10 +175,12 @@ class Snapshot:
             "services": lambda: service_rows(self.runner([
                 "/usr/bin/systemctl", "show", "--no-pager",
                 "--property=Id,LoadState,ActiveState,SubState,MainPID,NRestarts,ExecMainStatus,ActiveEnterTimestamp,ExecStart,FragmentPath",
-                *COLLECTORS, WEB_UNIT])),
+                *COLLECTORS, WEB_UNIT, "chompedr-response.service"])),
             "rules": lambda: json.loads(self.runner([self.binary, "export-rules"])),
             "logs": lambda: parse_journal(self.runner(journal_args(100))),
         }
+        if self.response_socket is not None:
+            operations["responses"] = lambda: response_control(self.response_socket, {"command": "overview"})
         for name, operation in operations.items():
             try:
                 value = operation()
@@ -219,7 +246,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def do_GET(self):
+    def trusted_request(self, write=False):
         # Loopback plus Host/Origin checks prevent DNS rebinding and cross-site reads.
         authority = self.headers.get("Host", "").lower()
         origin = self.headers.get("Origin")
@@ -227,10 +254,15 @@ class Handler(BaseHTTPRequestHandler):
         trusted_host = (separator and host in self.server.allowed_hosts and port.isdecimal()
                         and 1 <= int(port) <= 65535)
         # An SSH tunnel may use a different local port from the VM listening port.
-        if (not trusted_host or
+        if (not trusted_host or (write and origin != "http://" + authority) or
             (origin is not None and origin != "http://" + authority) or
                 self.headers.get("Sec-Fetch-Site") == "cross-site"):
             self.send_body(403, b"Forbidden", "text/plain")
+            return False
+        return True
+
+    def do_GET(self):
+        if not self.trusted_request():
             return
         path = urlsplit(self.path).path
         if path == "/api/snapshot":
@@ -247,11 +279,38 @@ class Handler(BaseHTTPRequestHandler):
             self.send_body(404, b"Not found", "text/plain")
 
     def do_POST(self):
-        self.send_body(405, b"Read-only dashboard", "text/plain")
+        match = re.fullmatch(r"/api/responses/([0-9a-f]{64})/(approve|reject|pause|resume)", self.path)
+        if match is None:
+            self.send_body(405, b"Unsupported operation", "text/plain")
+            return
+        if not self.trusted_request(write=True):
+            return
+        token = self.headers.get("Authorization", "")
+        if not token.startswith("Bearer ") or not 32 <= len(token[7:]) <= 256:
+            self.send_body(403, b"Management token required", "text/plain")
+            return
+        if self.headers.get("Transfer-Encoding") or self.headers.get("Content-Length", "0") != "0":
+            self.send_body(400, b"Decision requests must have an empty body", "text/plain")
+            return
+        if self.server.snapshot.response_socket is None:
+            self.send_body(503, b"Response service unavailable", "text/plain")
+            return
+        try:
+            result = response_control(self.server.snapshot.response_socket,
+                                      {"command": match[2], "id": match[1], "token": token[7:]})
+        except ControlError as error:
+            self.send_body(error.code, str(error).encode(), "text/plain")
+        except (OSError, ValueError, RuntimeError):
+            self.send_body(503, b"Response service unavailable", "text/plain")
+        else:
+            self.send_body(200, json.dumps(result).encode(), "application/json")
 
-    do_PUT = do_POST
-    do_PATCH = do_POST
-    do_DELETE = do_POST
+    def reject_write(self):
+        self.send_body(405, b"Unsupported operation", "text/plain")
+
+    do_PUT = reject_write
+    do_PATCH = reject_write
+    do_DELETE = reject_write
 
     def log_message(self, format_string, *args):
         # No request strings or untrusted URLs in service logs.
@@ -262,11 +321,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, default=Path("/usr/local/lib/chomp-edr/chompedr"))
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--response-socket", type=Path, default=Path("/run/chomp-edr-response/control.sock"))
     args = parser.parse_args()
     if not 1024 <= args.port <= 65535:
         parser.error("port must be 1024..65535")
     binary = args.binary.resolve(strict=True)
-    snapshot = Snapshot(binary)
+    snapshot = Snapshot(binary, response_socket=args.response_socket)
     server = DashboardServer(("127.0.0.1", args.port), snapshot)
     reader = threading.Thread(target=snapshot.follow, daemon=True)
     reader.start()

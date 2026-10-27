@@ -4,15 +4,18 @@ const names = {
   "chompedr-ssh.service": "SSH",
   "chompedr-processes.service": "Processes",
   "chompedr-files.service": "Files",
+  "chompedr-response.service": "Responses",
   "chompedr-dashboard.service": "Dashboard"
 };
 const descriptions = {
   "chompedr-ssh.service": "Authentication events and grouped failure detection.",
   "chompedr-processes.service": "Periodic /proc snapshots and executable location review.",
   "chompedr-files.service": "Metadata changes on selected files and directories.",
-  "chompedr-dashboard.service": "Local web interface and read-only journal access."
+  "chompedr-response.service": "Response queue, approvals and action execution.",
+  "chompedr-dashboard.service": "Local web interface and authenticated response decisions."
 };
 const views = {
+  responses: ["Response management", "Review actions, approve requests, and inspect execution history.", "Responses"],
   alerts: ["Alert activity", "Investigate detections from your competition endpoint.", "Alerts"],
   rules: ["Detection rules", "Inspect bundled detections and their source definitions.", "Detection rules"],
   collectors: ["Endpoint collectors", "Inspect service state, restarts, and launch configuration.", "Collectors"],
@@ -23,6 +26,7 @@ let paused = false;
 let loading = false;
 let lastSuccess = 0;
 let activeView = "alerts";
+let deciding = false;
 const signatures = {};
 
 function node(tag, text, className) {
@@ -151,7 +155,7 @@ function renderServices() {
     const card = node("article", null, "service-card");
     const top = node("div", null, "card-top");
     top.append(node("code", id), badge(service.ActiveState || "unknown"));
-    card.append(top, node("h3", name + (name === "Dashboard" ? " server" : " collector")),
+    card.append(top, node("h3", name + (name === "Dashboard" ? " server" : name === "Responses" ? " worker" : " collector")),
       node("p", descriptions[id]));
     const dl = node("dl");
     for (const [label, value] of [
@@ -190,6 +194,94 @@ function renderLogs() {
   }
   $("log-list").replaceChildren(fragment);
 }
+async function decideResponse(request, decision) {
+  if (deciding) return;
+  const token = $("management-token").value.trim();
+  if (!token) {
+    $("response-message").textContent = "Enter the administrator management token to approve or reject requests.";
+    $("management-token").closest("details").open = true;
+    $("management-token").focus();
+    return;
+  }
+  const action = request.response && request.response.action;
+  if (!window.confirm((decision === "approve" ? "Approve execution of " : decision === "reject" ? "Reject " : "") +
+      (decision === "pause" ? "Pause preservation of " : decision === "resume" ? "Capture a new baseline and resume preservation of " : text(action) + " for ") + JSON.stringify(request.target) + "?")) return;
+  deciding = true;
+  renderResponses();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch("/api/responses/" + encodeURIComponent(request.id) + "/" + decision,
+      {method: "POST", headers: {Authorization: "Bearer " + token}, signal: controller.signal});
+    if (!response.ok) throw new Error(await response.text());
+    const result = await response.json();
+    $("response-message").textContent = decision === "pause" ? "Preservation paused. You can now make legitimate changes." : decision === "resume" ? "Resume requested. Current contents will become the new baseline at activation." : decision === "approve" ?
+      "Approved and queued. The worker will verify the target again before execution." : "Request rejected.";
+    // The background snapshot can lag a successful decision; prevent repeat clicks immediately.
+    request.status = result.status;
+    renderResponses();
+    setTimeout(() => refresh(true), 1200);
+  } catch (error) {
+    $("response-message").textContent = "Decision could not be confirmed: " + error.message +
+      ". Refresh the request status before trying again.";
+  } finally {
+    clearTimeout(timeout);
+    deciding = false;
+    renderResponses();
+  }
+}
+function renderResponses() {
+  const responses = data && data.responses;
+  const available = data && data.sources.responses && data.sources.responses.ok;
+  const search = $("response-search").value.trim().toLowerCase();
+  const status = $("response-status").value;
+  const requests = responses ? responses.requests : [];
+  const rows = requests.filter((request) => (!status || request.status === status) &&
+    (!search || JSON.stringify(request).toLowerCase().includes(search)));
+  $("pending-count").textContent = available ? responses.pending_count : "—";
+  const fragment = document.createDocumentFragment();
+  for (const request of rows) {
+    const row = node("tr");
+    const created = new Date(request.created * 1000);
+    const when = node("td", formatTime(created), "time");
+    when.title = fullTime(created);
+    const action = node("td", text(request.rule_id));
+    const inspect = node("button", text(request.response && request.response.action), "rule-button");
+    inspect.addEventListener("click", () => detail("RESPONSE REQUEST", request.id, request));
+    action.append(node("br"), inspect);
+    const target = node("td", JSON.stringify(request.target), "response-target");
+    target.title = request.detail || "";
+    const state = node("td", request.status);
+    state.append(node("span", request.response && request.response.mode || "dry_run", "secondary"));
+    const controls = node("td");
+    const preserve = request.response && request.response.action === "preserve_file";
+    const decisions = request.status === "pending" ? ["approve", "reject"] : preserve && request.status === "active" ? ["pause"] : preserve && request.status === "paused" ? ["resume"] : [];
+    if (decisions.length) {
+      for (const decision of decisions) {
+        const button = node("button", ({approve: "Approve", reject: "Reject", pause: "Pause", resume: "Resume"})[decision], "button");
+        button.disabled = !available || deciding;
+        button.addEventListener("click", () => decideResponse(request, decision));
+        controls.append(button);
+      }
+    } else controls.append(node("span", request.detail, "secondary"));
+    row.append(when, action, target, state, controls);
+    fragment.append(row);
+  }
+  $("response-table").replaceChildren(fragment);
+  $("response-empty").hidden = rows.length > 0;
+  $("response-empty").textContent = !available ? "Response service unavailable. Cached requests may be stale; decisions are disabled." :
+    "No response requests match this view. Rules without response declarations do not create requests.";
+  $("response-count").textContent = rows.length + " of " + requests.length + " retained requests shown";
+  const audit = document.createDocumentFragment();
+  for (const entry of responses ? responses.audit : []) {
+    const line = node("div", null, "log-row");
+    const link = node("button", text(entry.id).slice(0, 16) + "… · " + text(entry.status), "text-button");
+    link.addEventListener("click", () => detail("RESPONSE AUDIT", entry.id, entry));
+    line.append(node("span", fullTime(new Date(entry.at * 1000)), "secondary"), link, node("pre", entry.detail));
+    audit.append(line);
+  }
+  $("response-audit").replaceChildren(audit);
+}
 function connection(state, label) {
   $("connection-dot").className = "dot" + (state ? " " + state : "");
   $("connection-label").textContent = label;
@@ -202,7 +294,7 @@ function render() {
   $("metric-alerts").textContent = (data.loading || (sourceUnavailable("alerts") && !data.alerts.length)) ? "—" : data.alerts.length;
   $("metric-high").textContent = sourceUnavailable("alerts") && !data.alerts.length ? "—" :
     data.alerts.filter((a) => a.severity === "high" || a.severity === "critical").length;
-  const collectors = data.services.filter((row) => row.Id !== "chompedr-dashboard.service" && row.ActiveState === "active").length;
+  const collectors = data.services.filter((row) => ["chompedr-ssh.service", "chompedr-processes.service", "chompedr-files.service"].includes(row.Id) && row.ActiveState === "active").length;
   $("metric-collectors").textContent = (data.loading || sourceUnavailable("services")) ? "—" : collectors + " / 3";
   const ruleCount = data.rules ? data.rules.files.reduce((sum, file) => sum + file.rules.length, 0) : "—";
   $("metric-rules").textContent = ruleCount;
@@ -221,7 +313,7 @@ function render() {
   $("updated").textContent = data.updated_at ? "Snapshot " + new Date(data.updated_at).toLocaleTimeString() + " · browser local time" :
     "Waiting for first snapshot";
   $("updated").title = times.join("\n");
-  for (const [key, draw] of [["alerts", renderAlerts], ["rules", renderRules], ["services", renderServices], ["logs", renderLogs]]) {
+  for (const [key, draw] of [["alerts", renderAlerts], ["rules", renderRules], ["services", renderServices], ["logs", renderLogs], ["responses", renderResponses]]) {
     const signature = JSON.stringify([data[key], data.sources[key] && data.sources[key].ok, data.loading]);
     if (signatures[key] !== signature) { draw(); signatures[key] = signature; }
   }
@@ -267,6 +359,8 @@ for (const button of document.querySelectorAll("[data-view]")) {
 for (const id of ["alert-search", "severity", "collector"]) $(id).addEventListener("input", renderAlerts);
 $("rule-search").addEventListener("input", renderRules);
 $("log-search").addEventListener("input", renderLogs);
+for (const id of ["response-search", "response-status"]) $(id).addEventListener("input", renderResponses);
+$("clear-token").addEventListener("click", () => { $("management-token").value = ""; $("response-message").textContent = "Management token cleared."; });
 $("refresh").addEventListener("click", () => refresh(true));
 $("pause").addEventListener("click", () => {
   paused = !paused;

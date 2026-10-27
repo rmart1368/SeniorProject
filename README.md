@@ -41,6 +41,12 @@ The latest CLI update removes interactive mode and updates its regression tests.
 | Linux installer | 5 tests passed | User installation, unit validation, upgrades, path handling, and symlink refusal |
 | Real Linux SSH integration | Passed on Ubuntu CI | Six rejected loopback logins produced one grouped alert; continuous pipeline emitted before EOF |
 
+Response and preservation update (2026-10-27): Linux cloud checks passed with
+73 Rust tests, 50 Python tests, live process/file checks, browser approval and
+maintenance flows, and native release packaging with staged installation.
+Systemd/SSH deployment and the cross-platform matrix for this update await CI;
+actual firewalld behavior requires a firewalld test host.
+
 ### Next work
 
 - [x] Confirm the initial GitHub CI matrix passes on all three platforms.
@@ -55,7 +61,7 @@ The latest CLI update removes interactive mode and updates its regression tests.
 - [ ] Collect representative target-host data and tune rules against benign and suspicious activity.
 - [ ] Expand the starter rules into a tested default rule set.
 - [x] Add bounded time-window thresholds grouped by event fields.
-- [ ] Design explicit response policies and audit records before implementing endpoint actions.
+- [x] Add per-response execution modes, a durable approval queue, audit records, and initial Linux action executors.
 
 ### Pitch milestones
 
@@ -104,7 +110,7 @@ The CI workflow packages native Windows, Linux, and macOS executables with rules
 
 ## Web dashboard
 
-A local read-only dashboard shows retained alerts, bundled rule YAML, collector status and diagnostics. It runs as a separate unprivileged system service on the VM and can be viewed from a desktop over an SSH tunnel. See the [dashboard installation and access guide](docs/dashboard.md); existing service installations need the updated binary for embedded-rule export.
+A local dashboard shows retained alerts, bundled rule YAML, collector status, diagnostics, response requests and audit history. Administrators can approve or reject pending responses in the Responses tab. It runs as a separate unprivileged system service on the VM and can be viewed from a desktop over an SSH tunnel. See the [dashboard installation and access guide](docs/dashboard.md); existing service installations need the updated binary for embedded-rule export.
 
 ## Linux installation
 
@@ -283,11 +289,91 @@ Comparisons default to case-sensitive and require a nonempty string `value`; quo
 
 Fields use dotted object paths (`process.executable`). Missing fields, nulls, and non-string values fail comparisons. No implicit conversion, array indexing, literal dotted keys, or numeric comparison is supported yet. Optional threshold rules support time-window correlation; see [SSH detection](docs/ssh-demo.md). Regexes compile once when loading rules; lookaround and backreferences are not supported by the Rust regex engine. Existing version 1 rules keep their behavior when the new fields are omitted.
 
+### File preservation
+
+The `preserve_file` action snapshots a selected file or directory before changes,
+alerts on differences, and restores its baseline. Pause it for legitimate edits,
+then resume to capture a new baseline. See [preservation setup and maintenance](docs/preservation.md).
+
+### Response declarations
+
+Version 1 rules may include an optional `response` list. The loader validates these
+entries and includes them in matching JSON alerts and `validate --format json`
+metadata. The Linux response service executes supported actions from installed collector
+alerts according to their mode. Standalone `scan` only emits metadata; it never
+executes actions. See [response execution and approvals](docs/responses.md).
+Existing rules need no changes; alerts without response declarations retain their
+existing JSON fields. Text alerts retain their existing summary format.
+
+```yaml
+version: 1
+rules:
+  - id: CUSTOM-RESPONSE-001
+    name: Temporary executable observed
+    severity: high
+    detection:
+      all:
+        - field: process.executable
+          op: starts_with
+          value: /tmp/
+    response:
+      - action: terminate_process
+        target:
+          pid_field: process.pid
+          start_time_field: process.start_ticks
+        mode: approval_required
+      - action: quarantine_file
+        target:
+          field: process.executable
+        mode: approval_required
+```
+
+Supported action names and target shapes:
+
+| Action | Target declaration |
+| --- | --- |
+| `notify` | `field`: event field identifying a notification destination |
+| `block_ip` | `field`: event field containing the IP address |
+| `terminate_process`, `suspend_process` | `pid_field` and `start_time_field`: distinct event fields identifying the process |
+| `preserve_file` | `path`: literal absolute file/directory path; see preservation setup above |
+| `quarantine_file`, `delete_file` | `field`: event field containing the file path |
+| `isolate_host` | `field`: event field identifying the endpoint |
+| `disable_account` | `field`: event field identifying the account |
+
+Except for the explicit `preserve_file` path, targets are nonempty dotted object paths, such as `source.ip`, not literal values
+or shell commands. Empty path components and whitespace are rejected. A process
+target must provide both field references. These declarations do not add event
+requirements: absent or mistyped target values do not suppress detection, and
+the rule parser does not resolve or type-check targets against events. The
+response service validates and captures targets when it receives an alert.
+The Linux process collector supplies `process.pid` and `process.start_ticks`;
+`start_time_field` can reference those start ticks as shown above.
+
+`mode` accepts `dry_run` (the default), `approval_required`, or `automatic` as
+the response service execution policy. Only `block_ip` accepts optional `duration`,
+written as a positive integer (at most 4294967295) followed by `s`, `m`, `h`, or
+`d`, for example:
+
+```yaml
+    response:
+      - action: block_ip
+        target:
+          field: source.ip
+        duration: 15m
+        mode: automatic
+```
+
+Omitting duration records no expiration preference; firewalld runtime rules last until reload/reboot or manual removal. Unknown actions, modes, properties, incompatible target shapes,
+and invalid durations fail rule loading, including for disabled rules. Response
+order is preserved. Checkpoint rule identity includes response declarations so
+changed response metadata cannot silently reuse an incompatible checkpoint.
+
 ## Architecture and scope
 
 `src/lib.rs` owns rule parsing, validation, compilation, and pure event evaluation. `src/main.rs` handles arguments, bounded streaming input, formatting, and exit codes. This boundary lets future UNIX collectors call the same engine without going through the CLI.
 
-This release scans supplied events or supported SSH log records and correlates threshold matches across event-time windows. External shell pipelines can supply appended log records. It does not install a live collector, kill processes, isolate hosts, or execute rule-defined commands. The starter and SSH rules demonstrate the schema and can flag legitimate activity; they are not a validated production detection set.
+This release scans supplied events or supported SSH log records and correlates threshold matches across event-time windows. External shell pipelines can supply appended log records. Installed Linux collectors can trigger supported responses through the response
+service. Host isolation and arbitrary rule-defined commands are not implemented. The starter and SSH rules demonstrate the schema and can flag legitimate activity; they are not a validated production detection set.
 
 The source uses portable Rust APIs. CI is configured for Linux, macOS, and Windows; actual compatibility should be confirmed by successful runs on each platform. UNIX-specific endpoint collection remains future work.
 
@@ -301,7 +387,7 @@ cargo test --locked
 
 Tests cover operators, missing/mistyped fields, all/any/none semantics, case-insensitive literals and regexes, disabled rules, invalid configuration, deterministic multi-rule alerts, cross-file duplicates, atomic ID selection, sorted directory loading, JSON rule listing, CLI file/stdin input, JSON output, error codes, CRLF, and event size limits. Dependencies are recorded in `Cargo.lock`.
 
-Next milestones: live Linux verification and broader log support; tuning against representative real activity; explicit response policy and audited response actions.
+Next milestones: live Linux verification and broader log support; tuning against representative real activity; target-VM validation of response actions and broader response policy controls.
 
 Dependency references: [Clap CLI derive documentation](https://docs.rs/clap/latest/clap/_derive/), [YAML parser](https://docs.rs/serde_yaml_ng/latest/serde_yaml_ng/), [Rust regex syntax](https://docs.rs/regex/latest/regex/#syntax).
 

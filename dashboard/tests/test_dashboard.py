@@ -148,5 +148,116 @@ class HttpTests(unittest.TestCase):
 
 
 
+class ResponseControlTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.worker = module('response_worker_for_web', ROOT / 'response/worker.py')
+        self.control = module('response_control_for_web', ROOT / 'response/control.py')
+        self.state = self.root / 'state'
+        queue = self.worker.Queue(self.state)
+        response = {'action': 'block_ip', 'target': {'field': 'source.ip'}, 'mode': 'approval_required'}
+        for cursor in ('first', 'second'):
+            queue.ingest({'_SYSTEMD_UNIT': self.worker.UNITS[0], '__CURSOR': cursor,
+                          'MESSAGE': json.dumps({'rule_id': 'web-test', 'event': {'source': {'ip': '192.0.2.4'}}, 'response': [response]})})
+        self.ids = [r['id'] for r in queue.rows()]
+        queue.db.close()
+        self.token = self.control.management_token(self.state)
+        self.socket = self.root / 'runtime/control.sock'
+        self.broker = self.control.ControlServer(self.socket, lambda: self.worker.Queue(self.state), self.token)
+        self.broker_thread = threading.Thread(target=self.broker.serve_forever, daemon=True)
+        self.broker_thread.start()
+        self.snapshot = WEB.Snapshot('/unused', response_socket=self.socket)
+        self.snapshot.data['responses'] = WEB.response_control(self.socket, {'command': 'overview'})
+        self.server = WEB.DashboardServer(('127.0.0.1', 0), self.snapshot)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.url = 'http://127.0.0.1:' + str(self.server.server_address[1])
+        self.addCleanup(self.close)
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=3)
+        self.broker.shutdown()
+        self.broker.server_close()
+        self.broker_thread.join(timeout=3)
+
+    def decide(self, decision='approve', index=0, token=None, origin=None):
+        headers = {'Authorization': 'Bearer ' + (self.token if token is None else token),
+                   'Origin': self.url if origin is None else origin}
+        return urlopen(Request(self.url + '/api/responses/' + self.ids[index] + '/' + decision,
+                               headers=headers, method='POST'), timeout=3)
+
+    def test_snapshot_lists_targets_modes_and_audit_without_token(self):
+        with urlopen(self.url + '/api/snapshot', timeout=3) as response:
+            raw = response.read()
+            data = json.loads(raw)
+        self.assertNotIn(self.token.encode(), raw)
+        self.assertEqual(data['responses']['pending_count'], 2)
+        row = data['responses']['requests'][0]
+        self.assertEqual(row['target']['ip'], '192.0.2.4')
+        self.assertEqual(row['response']['mode'], 'approval_required')
+        self.assertEqual(len(data['responses']['audit']), 2)
+
+    def test_browser_approval_and_rejection_persist_without_executing_in_web_server(self):
+        with self.decide() as response:
+            self.assertEqual(json.load(response)['status'], 'queued')
+        with self.decide('reject', 1) as response:
+            self.assertEqual(json.load(response)['status'], 'rejected')
+        overview = WEB.response_control(self.socket, {'command': 'overview'})
+        self.assertEqual({r['status'] for r in overview['requests']}, {'queued', 'rejected'})
+        self.assertEqual(overview['pending_count'], 0)
+        self.assertEqual(len(overview['audit']), 4)
+        with self.assertRaises(HTTPError) as raised:
+            self.decide()
+        self.assertEqual(raised.exception.code, 409)
+        raised.exception.close()
+
+    def test_invalid_token_and_cross_origin_cannot_approve(self):
+        for kwargs in [{'token': 'x' * 43}, {'token': ''}, {'origin': 'http://attacker.example'}, {'origin': ''}]:
+            with self.assertRaises(HTTPError) as raised:
+                self.decide(**kwargs)
+            self.assertEqual(raised.exception.code, 403)
+            raised.exception.close()
+        self.assertEqual(WEB.response_control(self.socket, {'command': 'overview'})['pending_count'], 2)
+
+    def test_authenticated_pause_resume_rebaselines_preservation(self):
+        preserve = module('preserve_for_web', ROOT / 'response/preserve.py')
+        target = self.root / 'config.txt'
+        target.write_text('trusted')
+        queue = self.worker.Queue(self.state, executor=lambda response, target, state, key:
+                                  preserve.activate(state, key, target['path'], refresh=target.get('refresh_baseline', False)))
+        self.addCleanup(queue.db.close)
+        rule = {'id': 'preserve-web', 'name': 'Preserve web test', 'severity': 'high', 'enabled': True,
+                'response': [{'action': 'preserve_file', 'target': {'path': str(target)}, 'mode': 'automatic'}]}
+        manager = preserve.Manager(queue, '/unused', '/unused', loader=lambda: [rule])
+        manager.tick()
+        queue.run_one()
+        self.ids.append(queue.rows()[-1]['id'])
+        with self.decide('pause', 2) as result:
+            self.assertEqual(json.load(result)['status'], 'paused')
+        target.write_text('legitimate')
+        manager.tick()
+        self.assertEqual(target.read_text(), 'legitimate')
+        with self.decide('resume', 2) as result:
+            self.assertEqual(json.load(result)['status'], 'queued')
+        queue.run_one()
+        target.write_text('malicious')
+        manager.tick()
+        self.assertEqual(target.read_text(), 'legitimate')
+
+    def test_socket_peer_authorization_and_unavailable_service(self):
+        self.broker.allowed_uids = set()
+        with self.assertRaises(WEB.ControlError):
+            WEB.response_control(self.socket, {'command': 'overview'})
+        self.snapshot.response_socket = self.root / 'missing.sock'
+        with self.assertRaises(HTTPError) as raised:
+            self.decide()
+        self.assertEqual(raised.exception.code, 503)
+        raised.exception.close()
+
+
 if __name__ == "__main__":
     unittest.main()

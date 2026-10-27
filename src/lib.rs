@@ -7,6 +7,7 @@ pub mod checkpoint;
 pub mod files;
 pub mod monitor;
 pub mod processes;
+pub mod response;
 pub mod session;
 pub mod ssh;
 pub mod terminal;
@@ -33,6 +34,8 @@ pub struct Rule {
     detection: Detection,
     #[serde(default)]
     pub threshold: Option<Threshold>,
+    #[serde(default)]
+    pub response: Vec<response::Response>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -194,6 +197,8 @@ pub struct Alert<'a> {
     pub rule_name: &'a str,
     pub severity: Severity,
     pub event: &'a Value,
+    #[serde(skip_serializing_if = "<[response::Response]>::is_empty")]
+    pub response: &'a [response::Response],
 }
 
 impl Engine {
@@ -213,11 +218,15 @@ impl Engine {
                 .iter()
                 .map(|r| {
                     let m = &r.metadata;
-                    serde_json::json!({"id": m.id, "name": m.name, "description": m.description,
+                    let mut identity = serde_json::json!({"id": m.id, "name": m.name, "description": m.description,
                 "severity": m.severity, "enabled": m.enabled,
                 "all": conditions(&r.all), "any": conditions(&r.any), "none": conditions(&r.none),
                 "threshold": m.threshold.as_ref().map(|t| serde_json::json!({
-                    "count":t.count,"window_seconds":t.window_seconds,"group_by":t.group_by}))})
+                    "count":t.count,"window_seconds":t.window_seconds,"group_by":t.group_by}))});
+                    if !m.response.is_empty() {
+                        identity["response"] = serde_json::to_value(&m.response).expect("response metadata serializes");
+                    }
+                    identity
                 })
                 .collect(),
         )
@@ -235,6 +244,11 @@ impl Engine {
         let mut ids = HashSet::new();
         let mut rules = Vec::new();
         for mut rule in file.rules {
+            for response in &rule.response {
+                response
+                    .validate()
+                    .map_err(|e| format!("rule {}: {e}", rule.id))?;
+            }
             if let Some(t) = &rule.threshold {
                 if !(2..=1000).contains(&t.count)
                     || !(1..=86400).contains(&t.window_seconds)
@@ -342,6 +356,7 @@ impl Engine {
                 rule_name: &r.metadata.name,
                 severity: r.metadata.severity,
                 event,
+                response: &r.metadata.response,
             })
             .collect()
     }

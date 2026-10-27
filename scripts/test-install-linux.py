@@ -26,7 +26,7 @@ class SystemInstallation(unittest.TestCase):
 
     def test_staging_and_unit_validation(self):
         written = self.install(["/tmp/example with spaces", "/etc/passwd"])
-        self.assertEqual(len(written), 12)
+        self.assertEqual(len(written), 17)
         binary = self.root / INSTALLER.BINARY_PATH.relative_to("/")
         self.assertEqual(binary.read_bytes(), BINARY.read_bytes())
         self.assertEqual(binary.stat().st_mode & 0o777, 0o755)
@@ -41,6 +41,10 @@ class SystemInstallation(unittest.TestCase):
         direct = subprocess.run([str(binary), "--version"],
                                 capture_output=True, text=True, check=True)
         self.assertEqual(result.stdout, direct.stdout)
+        response_list = subprocess.run([str(local_launcher), "responses", "--state", str(self.root / "private-response-state"), "list"],
+                                       capture_output=True, text=True, timeout=10)
+        self.assertEqual(response_list.returncode, 0, response_list.stderr)
+        self.assertEqual(response_list.stdout.strip(), "[]")
         directory = self.root / INSTALLER.UNIT_DIR.relative_to("/")
         for name in INSTALLER.SERVICES:
             text = (directory / name).read_text()
@@ -70,7 +74,7 @@ class SystemInstallation(unittest.TestCase):
                 INSTALLER.install(BINARY, destdir=self.root, port=port)
             self.assertFalse((self.root / "usr").exists())
         written = INSTALLER.install(BINARY, destdir=self.root, port=9000)
-        self.assertEqual(len(written), 12)
+        self.assertEqual(len(written), 17)
         assets = self.root / INSTALLER.DASHBOARD_DIR.relative_to("/")
         self.assertEqual((assets / "web").stat().st_mode & 0o777, 0o755)
         self.assertTrue((assets / "server.py").is_file())

@@ -110,3 +110,11 @@ dialog pre{padding:23px;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;fon
 @media(min-width:1450px){main{padding-top:43px}.page-heading{margin-bottom:35px}.metrics{margin-bottom:32px}.metric{padding:23px}.metric strong{font-size:36px}}
 @media(max-width:1100px){.sidebar{width:198px;padding:27px 13px}.main-shell{margin-left:198px}.brand{font-size:20px;gap:8px}.brand-sub{font-size:7px}main{padding:28px 22px}.topbar{padding:0 22px}.metric{padding:16px 13px}.metric small{font-size:9px}.filters{flex-wrap:wrap}.filters .search{flex-basis:100%}.heading-actions{flex-direction:column}}
 @media(max-width:760px){.sidebar{position:static;width:auto;padding:16px;border-bottom:1px solid var(--line);border-right:0}.brand{font-size:20px}.brand svg{width:27px;height:31px}.workspace,.nav-caption,.sidebar-bottom{display:none}nav{display:flex;margin-top:16px;gap:4px;overflow:auto}.nav-item{width:auto;white-space:nowrap;padding:8px;font-size:11px;gap:6px}.nav-item>span:first-child{font-size:16px;width:auto}.nav-count{display:none}.main-shell{margin-left:0}.topbar{height:48px;padding:0 16px}main{padding:24px 16px}.page-heading{align-items:flex-start;gap:12px}.page-heading p{font-size:12px}h1{font-size:25px}.heading-actions{gap:7px}.heading-actions .button{font-size:10px;padding:8px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.metric strong{font-size:28px}.metric small{font-size:9px}.panel-heading{padding:17px;align-items:flex-start}.panel-heading p{font-size:10px}.filters{padding:0 17px 16px}.panel-footer{padding:13px 17px;flex-direction:column}.rule-grid,.service-grid{grid-template-columns:1fr}.standalone{padding:0 0 17px;flex-direction:column}.standalone .search{max-width:none;width:100%}.page-footer{flex-direction:column}.table-wrap{max-width:100%}}
+
+.response-access { padding: 16px 24px; border-bottom: 1px solid var(--line); }
+.response-access input { width: min(26rem, 100%); padding: 8px; margin: 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--bg); }
+.response-message { padding: 0 24px; color: var(--muted); }
+.response-target { max-width: 24rem; overflow-wrap: anywhere; }
+#response-table .button { margin: 3px; }
+
+#response-audit .text-button { display: block; margin-top: 4px; }

@@ -68,7 +68,7 @@ def main():
         files += sorted(p.relative_to(REPO) for p in (REPO / "docs").glob("*.md"))
         if system == "linux":
             files += [Path("scripts/install-linux.py"), Path("scripts/install-dependencies-linux.sh"),
-                      Path("dashboard/server.py")]
+                      Path("dashboard/server.py"), Path("response/worker.py"), Path("response/control.py"), Path("response/preserve.py")]
             files += sorted(p.relative_to(REPO) for p in (REPO / "dashboard/web").iterdir() if p.is_file())
         for relative in files:
             target = package / relative
@@ -128,6 +128,17 @@ See docs/downloads.md for compatibility, checksums, and download instructions.
         help_result = run(binary, "monitor", "--help", cwd=root)
         if help_result.returncode != 0 or "--status" not in help_result.stdout:
             raise RuntimeError("Packaged executable is missing monitor status")
+        if system == "linux":
+            response_state = work / "response-state"
+            for command in ("list", "audit"):
+                result = run(binary, "responses", "--state", str(response_state), command, cwd=root)
+                if result.returncode != 0 or json.loads(result.stdout) != []:
+                    raise RuntimeError("Packaged response management failed: " + result.stderr)
+            staged = subprocess.run([sys.executable, str(root / "scripts/install-linux.py"),
+                                     "--binary", str(binary), "--destdir", str(work / "staged")],
+                                    cwd=root, capture_output=True, text=True, timeout=30)
+            if staged.returncode != 0:
+                raise RuntimeError("Packaged staged installation failed: " + staged.stderr)
         shutil.copyfile(candidate, archive)
         checksum.write_text(f"{digest(archive)}  {archive.name}\n", encoding="ascii")
         print(f"PASS: extracted {system}/{machine} archive, verified all file hashes, and ran the two-alert demo")

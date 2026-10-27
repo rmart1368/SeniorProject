@@ -290,3 +290,23 @@ fn status_cli_works_without_collector_and_rejects_corrupt_state() {
     std::fs::write(dir.0.join("snapshot.json"), "corrupt").unwrap();
     assert!(checkpoint::status(engine(), &dir.0).is_err());
 }
+
+#[test]
+fn response_changes_cannot_reuse_checkpoint_or_overwrite_saved_state() {
+    let dir = Temp::new();
+    let source = include_str!("../rules/ssh.yaml");
+    scan(&dir, history(4));
+    let before = dir.bytes();
+    let changed = source.replacen(
+        "    detection:",
+        "    response:\n      - action: block_ip\n        target: {field: source.ip}\n        duration: 15m\n    detection:",
+        1,
+    );
+    assert_ne!(source, changed);
+    let engine = Engine::from_yaml(&changed).unwrap();
+    let error =
+        checkpoint::scan(engine, &dir.0, Cursor::new(history(6)), &mut Vec::new()).unwrap_err();
+    assert!(error.to_string().contains("rule"), "{error}");
+    assert_eq!(dir.bytes(), before);
+    assert_eq!(scan(&dir, history(6)).len(), 1);
+}

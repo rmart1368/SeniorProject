@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 SPEC = importlib.util.spec_from_file_location("system_installer", Path(__file__).with_name("install-linux.py"))
 INSTALLER = importlib.util.module_from_spec(SPEC)
@@ -80,6 +80,18 @@ def main():
         shutil.copy2(shutil.which("sleep"), executable)
         try:
             written = INSTALLER.install(binary, [str(watched)], port=port)
+            # Restrict the response integration rule to this disposable child executable.
+            custom_rules = folder / "response-rules.yaml"
+            custom_rules.write_text("version: 1\nrules:\n  - id: CHOMP-PROC-001\n    name: Disposable process response\n    severity: medium\n    detection:\n      all:\n        - field: process.executable\n          op: equals\n          value: " + json.dumps(str(executable)) + "\n    response:\n      - action: terminate_process\n        target:\n          pid_field: process.pid\n          start_time_field: process.start_ticks\n        mode: approval_required\n")
+            process_unit = INSTALLER.UNIT_DIR / "chompedr-processes.service"
+            process_unit.write_text(process_unit.read_text().replace("watch-processes --include-existing", "watch-processes --include-existing --rules " + str(custom_rules)))
+            preserved = folder / "preserved.conf"
+            preserved.write_text("trusted configuration")
+            preserve_rules = folder / "preserve.yaml"
+            preserve_yaml = ("version: 1\nrules:\n  - id: CONFIG-LIVE\n    name: Preserve live test config\n    severity: high\n    enabled: true\n    detection:\n      all:\n        - field: event.type\n          op: exists\n    response:\n      - action: preserve_file\n        target: {path: " + str(preserved) + "}\n        mode: automatic\n")
+            preserve_rules.write_text(preserve_yaml)
+            response_unit = INSTALLER.UNIT_DIR / "chompedr-response.service"
+            response_unit.write_text(response_unit.read_text().replace("worker.py follow", "worker.py --preserve-rules " + str(preserve_rules) + " follow"))
             command("systemd-sysusers", str(INSTALLER.SYSUSERS_PATH))
             command("systemctl", "daemon-reload")
             command("systemctl", "enable", "--now", "chompedr.target")
@@ -113,6 +125,37 @@ def main():
                 print(command("systemctl", "status", "chompedr-dashboard", "dbus", check=False).stdout, flush=True)
                 print(command("journalctl", "-u", "dbus", "--no-pager", "-n", "30").stdout, flush=True)
                 raise
+            response_cli = str(INSTALLER.CLI_PATH)
+            def pending():
+                rows = json.loads(command(response_cli, "responses", "list").stdout)
+                return next((row for row in rows if row["status"] == "pending" and
+                             (row.get("target") or {}).get("pid") == child.pid), None)
+            wait_for(lambda: pending() is not None, "Response was not queued for approval")
+            if child.poll() is not None:
+                raise RuntimeError("Approval-required action executed before approval")
+            token = command(response_cli, "responses", "dashboard-token").stdout.strip()
+            origin = f"http://127.0.0.1:{port}"
+            decision = Request(origin + "/api/responses/" + pending()["id"] + "/approve",
+                               headers={"Origin": origin, "Authorization": "Bearer " + token}, method="POST")
+            with urlopen(decision, timeout=5) as result:
+                if json.load(result).get("status") != "queued":
+                    raise RuntimeError("Dashboard approval did not queue action")
+            wait_for(lambda: child.poll() is not None, "Approved process termination did not execute")
+            if child.returncode != -15:
+                raise RuntimeError("Expected SIGTERM after response approval")
+            def guards():
+                return [r for r in json.loads(command(response_cli, "responses", "list").stdout)
+                        if r["rule_id"] == "CONFIG-LIVE"]
+            wait_for(lambda: any(r["status"] == "active" for r in guards()), "Preservation did not activate")
+            preserved.write_text("unauthorized update")
+            wait_for(lambda: preserved.read_text() == "trusted configuration", "Preservation did not restore file")
+            preserve_rules.write_text(preserve_yaml.replace("enabled: true", "enabled: false"))
+            wait_for(lambda: all(r["status"] == "disabled" for r in guards()), "Preservation did not disable")
+            preserved.write_text("legitimate update")
+            preserve_rules.write_text(preserve_yaml)
+            wait_for(lambda: any(r["status"] == "active" for r in guards()), "Preservation did not re-enable")
+            preserved.write_text("second unauthorized update")
+            wait_for(lambda: preserved.read_text() == "legitimate update", "Preservation did not use refreshed baseline")
             dashboard_uid = command("ps", "-o", "uid=", "-p", str(pid("chompedr-dashboard"))).stdout.strip()
             if not dashboard_uid or dashboard_uid == "0":
                 raise RuntimeError("Dashboard did not run as an unprivileged user")
@@ -125,7 +168,7 @@ def main():
                          f"Crash recovery failed: {name}")
             command("systemctl", "stop", "chompedr.target")
             wait_for(lambda: not any(active(name) for name in INSTALLER.SERVICES), "Target did not stop collectors")
-            print("PASS: collectors, real dashboard feeds, unprivileged web user, crash restarts and target stop")
+            print("PASS: collectors, real dashboard feeds, approved process response, unprivileged web user, crash restarts and target stop")
         finally:
             command("systemctl", "disable", "--now", "chompedr-dashboard.service", check=False)
             for path in dashboard_written:

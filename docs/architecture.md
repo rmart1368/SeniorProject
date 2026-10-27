@@ -1,6 +1,6 @@
 # Chomp EDR software architecture
 
-Updated October 1, 2026. Based on the implemented Rust rule engine and CLI at commit `79a7655`.
+The diagram below records the original October 1, 2026 CLI architecture at commit `79a7655`. For the current Linux response service, see [responses and approvals](responses.md).
 
 For the presentation, use the [deployment and component diagram with slide copy](architecture-slide.md). It shows the endpoint and process boundaries, user interaction, local files, and third-party library dependencies. The diagram below provides a more detailed execution view and proposed extensions.
 
@@ -82,4 +82,4 @@ flowchart TB
 4. Scan output contains alerts only; diagnostics go to stderr. Exit code 1 indicates alerts only when `--fail-on-alert` is requested; code 2 indicates an error. Output is flushed after each processed event.
 5. The CLI limits each rule file and event line to 1 MiB. The library performs no file I/O and expects its caller to enforce input-size limits.
 
-There is no background agent, database, network server, live collector, time-window state, or automatic response in the current implementation. Output files are produced through shell redirection. The future components are proposed integration points; their APIs and deployment design have not been implemented. Host-client orchestration and an optional dashboard remain later project backlog items and are omitted from the current runtime diagram.
+Since the original diagram, Linux collectors, time-window correlation, a dashboard with authenticated response approvals, and a separate response service have been implemented. Installed collectors write alerts to journald. The response service consumes those records into a private SQLite queue, applies each response mode, and executes supported actions after target verification. Operators approve or reject pending requests through `chompedr responses` or the web dashboard; standalone scans continue to emit alerts without executing responses. The diagram above is historical and does not show these service boundaries.

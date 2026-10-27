@@ -20,6 +20,9 @@ jobs:
       - name: Test unified Linux installation and service units
         if: runner.os == 'Linux'
         run: python3 scripts/test-install-linux.py target/debug/chompedr
+      - name: Test response queue, approvals and isolated actions
+        if: runner.os == 'Linux'
+        run: python3 -m unittest discover -s response/tests -p 'test_*.py'
       - name: Test real SSH authentication logs on Linux
         if: runner.os == 'Linux'
         run: sudo python3 scripts/live-ssh-test.py target/debug/chompedr
