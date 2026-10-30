@@ -9,6 +9,7 @@
   <script defer src="/app.js"></script>
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <aside class="sidebar">
     <a class="brand" href="/" aria-label="Chomp EDR home">
       <svg viewBox="0 0 40 44" fill="none" aria-hidden="true"><path d="M20 2 37 9v13c0 10-8 17-17 20C11 39 3 32 3 22V9L20 2Z" stroke="currentColor" stroke-width="2.5"/><path d="m11 17 5 5 4-5 4 5 5-5M12 28h16" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/></svg>
@@ -20,67 +21,115 @@
       <button class="nav-item selected" data-view="alerts" aria-current="page"><span aria-hidden="true">◈</span>Alerts<span id="nav-count" class="nav-count">—</span></button>
       <button class="nav-item" data-view="responses"><span aria-hidden="true">◇</span>Responses<span id="pending-count" class="nav-count">—</span></button>
       <button class="nav-item" data-view="rules"><span aria-hidden="true">▤</span>Detection rules</button>
-      <button class="nav-item" data-view="collectors"><span aria-hidden="true">▦</span>Collectors</button>
+      <button class="nav-item" data-view="collectors"><span aria-hidden="true">▦</span>Collectors<span id="collector-flag" class="nav-count warn" hidden>!</span></button>
       <button class="nav-item" data-view="logs"><span aria-hidden="true">≡</span>Diagnostics</button>
     </nav>
-    <div class="sidebar-bottom"><span class="read-only">ENDPOINT OPERATIONS</span><p>Detection and response in one place.</p><small id="version">Chomp EDR</small></div>
+    <div class="sidebar-bottom"><span class="read-only">ENDPOINT OPERATIONS</span><p>Detection and response in one place.</p><p class="hint">Press <kbd>?</kbd> for keyboard shortcuts.</p><small id="version">Chomp EDR</small></div>
   </aside>
   <div class="main-shell">
-    <header class="topbar"><div class="breadcrumb">Workspace <span>/</span> <strong id="breadcrumb">Alerts</strong></div><div class="connection"><span class="dot" id="connection-dot"></span><span id="connection-label">Connecting</span></div></header>
-    <main>
+    <header class="topbar">
+      <div class="breadcrumb">Workspace <span>/</span> <strong id="breadcrumb">Alerts</strong></div>
+      <div class="topbar-tools">
+        <div class="connection"><span class="dot" id="connection-dot"></span><span id="connection-label">Connecting</span><span id="updated-ago" class="ago"></span></div>
+        <button id="notify-toggle" class="icon-button" aria-pressed="false" title="Desktop notifications for new high and critical alerts">🔔<span class="sr-only">Toggle desktop notifications</span></button>
+        <button id="open-shortcuts" class="icon-button" title="Keyboard shortcuts (?)">⌨<span class="sr-only">Keyboard shortcuts</span></button>
+      </div>
+    </header>
+    <main id="main">
       <div class="page-heading"><div><div class="eyebrow">ENDPOINT OPERATIONS</div><h1 id="page-title">Alert activity</h1><p id="page-description">Investigate detections from your competition endpoint.</p></div><div class="heading-actions"><button id="pause" class="button">Pause refresh</button><button id="refresh" class="button primary">↻ Refresh</button></div></div>
       <div id="errors" class="notice" role="status" hidden></div>
       <div class="metrics">
-        <article class="metric"><span>Retained alerts</span><strong id="metric-alerts">—</strong><small>Retained alerts · last 24 hours</small></article>
-        <article class="metric"><span>High &amp; critical</span><strong id="metric-high">—</strong><small>Prioritize investigation</small></article>
-        <article class="metric"><span>Active collectors</span><strong id="metric-collectors">—</strong><small>SSH · processes · files</small></article>
-        <article class="metric"><span>Bundled rules</span><strong id="metric-rules">—</strong><small>From the installed executable</small></article>
+        <button class="metric" data-jump="alerts" data-preset="all"><span>Retained alerts</span><strong id="metric-alerts">—</strong><small id="metric-alerts-sub">Retained alerts · last 24 hours</small></button>
+        <button class="metric" data-jump="alerts" data-preset="high"><span>High &amp; critical</span><strong id="metric-high">—</strong><small id="metric-high-sub">Prioritize investigation</small></button>
+        <button class="metric" data-jump="responses" data-preset="pending"><span>Pending approvals</span><strong id="metric-pending">—</strong><small>Awaiting an administrator decision</small></button>
+        <button class="metric" data-jump="collectors"><span>Active collectors</span><strong id="metric-collectors">—</strong><small>SSH · processes · files</small></button>
+        <button class="metric" data-jump="rules"><span>Bundled rules</span><strong id="metric-rules">—</strong><small id="metric-rules-sub">From the installed executable</small></button>
       </div>
 
-      <section id="view-alerts" class="panel view" aria-label="Alerts">
-        <div class="panel-heading"><div><h2>Detection feed <span class="tag">24H</span></h2><p>Newest first. Select a detection to inspect its full event.</p></div><button id="export" class="button" disabled>↓ Export JSON</button></div>
-        <div class="filters"><label class="search"><span aria-hidden="true">⌕</span><input id="alert-search" type="search" placeholder="Search rules, hosts, IPs or file paths…" aria-label="Search alerts"></label><label><span class="sr-only">Severity</span><select id="severity"><option value="">All severities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label><label><span class="sr-only">Collector</span><select id="collector"><option value="">All collectors</option><option value="chompedr-ssh.service">SSH</option><option value="chompedr-processes.service">Processes</option><option value="chompedr-files.service">Files</option><option value="chompedr-response.service">Responses</option></select></label></div>
-        <div class="table-wrap"><table><thead><tr><th>TIME</th><th>SEVERITY</th><th>DETECTION</th><th>HOST / EVIDENCE</th><th>SOURCE</th></tr></thead><tbody id="alert-table"></tbody></table></div>
-        <div id="alert-empty" class="empty"><span>◈</span><h3>Waiting for endpoint data</h3><p>The dashboard will show real detections here.</p></div>
-        <footer class="panel-footer"><span id="alert-count">Loading alerts…</span><span>Up to 500 retained alerts · 24 hours</span></footer>
+      <section id="view-alerts" class="view" aria-label="Alerts">
+        <div id="new-banner" class="new-banner" role="status" hidden><span><span class="dot pulse"></span> <strong id="new-banner-text">New alerts</strong> arrived since you opened the dashboard.</span><span class="banner-actions"><button id="show-new" class="text-button">Sort newest first</button><button id="dismiss-new" class="button">Dismiss</button></span></div>
+        <div class="insights">
+          <article class="panel insight timeline-card">
+            <div class="insight-heading"><h2>Activity timeline <span class="tag">24H</span></h2><span id="timeline-summary" class="insight-meta">—</span></div>
+            <svg id="timeline" class="timeline" viewBox="0 0 240 64" preserveAspectRatio="none" role="group" aria-label="Hourly alert counts. Select an hour to filter."></svg>
+            <div id="timeline-axis" class="timeline-axis" aria-hidden="true"></div>
+          </article>
+          <article class="panel insight">
+            <div class="insight-heading"><h2>Severity mix</h2><span id="severity-total" class="insight-meta">—</span></div>
+            <div id="severity-bar" class="stack-bar" aria-hidden="true"></div>
+            <ul id="severity-legend" class="legend"></ul>
+          </article>
+          <article class="panel insight">
+            <div class="insight-heading"><h2>Top detections</h2></div>
+            <ol id="top-rules" class="rank-list"></ol>
+          </article>
+          <article class="panel insight">
+            <div class="insight-heading"><h2>Top evidence</h2></div>
+            <ol id="top-entities" class="rank-list"></ol>
+          </article>
+        </div>
+        <div class="panel">
+          <div class="panel-heading"><div><h2>Detection feed <span class="tag">24H</span></h2><p>Select a detection to inspect its full event. Review state is stored only in this browser.</p></div><div class="panel-actions"><button id="mark-reviewed" class="button" disabled>✓ Mark shown reviewed</button><button id="export-csv" class="button" disabled>↓ CSV</button><button id="export" class="button" disabled>↓ Export JSON</button></div></div>
+          <div class="filters"><label class="search"><span aria-hidden="true">⌕</span><input id="alert-search" type="search" placeholder="Search rules, hosts, IPs or file paths…  ( / )" aria-label="Search alerts"></label><label><span class="sr-only">Severity</span><select id="severity"><option value="">All severities</option><option value="high+">High &amp; critical</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label><label><span class="sr-only">Collector</span><select id="collector"><option value="">All collectors</option><option value="chompedr-ssh.service">SSH</option><option value="chompedr-processes.service">Processes</option><option value="chompedr-files.service">Files</option><option value="chompedr-response.service">Responses</option></select></label><label><span class="sr-only">Time range</span><select id="range"><option value="">Last 24 hours</option><option value="12">Last 12 hours</option><option value="6">Last 6 hours</option><option value="1">Last hour</option></select></label><label class="toggle"><input id="hide-reviewed" type="checkbox"> Hide reviewed</label></div>
+          <div id="alert-chips" class="chips" hidden></div>
+          <div class="table-wrap"><table><thead><tr><th class="check-col"><span class="sr-only">Reviewed</span></th><th data-sort="time" aria-sort="descending"><button class="sort">TIME</button></th><th data-sort="severity"><button class="sort">SEVERITY</button></th><th data-sort="detection"><button class="sort">DETECTION</button></th><th data-sort="evidence"><button class="sort">HOST / EVIDENCE</button></th><th data-sort="source"><button class="sort">SOURCE</button></th></tr></thead><tbody id="alert-table"></tbody></table></div>
+          <div id="alert-empty" class="empty"><span>◈</span><h3>Waiting for endpoint data</h3><p>The dashboard will show real detections here.</p></div>
+          <footer class="panel-footer"><span id="alert-count">Loading alerts…</span><span>Up to 500 retained alerts · 24 hours</span></footer>
+        </div>
       </section>
 
       <section id="view-responses" class="panel view" aria-label="Responses" hidden>
         <div class="panel-heading"><div><h2>Response requests</h2><p>Inspect targets and results. Approval queues an action for the response service.</p></div></div>
+        <div id="response-chips" class="chips status-chips"></div>
         <div class="filters">
-          <label class="search"><input id="response-search" type="search" placeholder="Search rule, action, target or request ID…" aria-label="Search responses"></label>
+          <label class="search"><span aria-hidden="true">⌕</span><input id="response-search" type="search" placeholder="Search rule, action, target or request ID…" aria-label="Search responses"></label>
           <label><span class="sr-only">Response status</span><select id="response-status"><option value="">All statuses</option><option value="active">Active preservation</option><option value="disabled">Disabled</option><option value="paused">Paused for maintenance</option><option value="pending">Pending approval</option><option value="queued">Queued</option><option value="executing">Executing</option><option value="succeeded">Succeeded</option><option value="failed">Failed</option><option value="rejected">Rejected</option><option value="dry_run">Dry run</option></select></label>
         </div>
-        <details class="response-access"><summary>Authorize browser approvals</summary><p>Get the administrator token with <code>sudo chompedr responses dashboard-token</code>, then enter it here. It stays in this page only; clear it when finished.</p><label>Management token <input id="management-token" type="password" autocomplete="off" spellcheck="false" aria-label="Management token"></label><button id="clear-token" class="button">Clear token</button></details>
+        <details class="response-access"><summary>Authorize browser approvals <span id="token-state" class="token-state">No token</span></summary><p>Get the administrator token with <code>sudo chompedr responses dashboard-token</code>, then enter it here. It stays in this page only; clear it when finished.</p><label>Management token <input id="management-token" type="password" autocomplete="off" spellcheck="false" aria-label="Management token"></label><button id="clear-token" class="button">Clear token</button></details>
         <p id="response-message" class="response-message" role="status" aria-live="polite"></p>
         <div class="table-wrap"><table><thead><tr><th>CREATED</th><th>RULE / ACTION</th><th>TARGET</th><th>MODE / STATUS</th><th>DECISION</th></tr></thead><tbody id="response-table"></tbody></table></div>
         <p id="response-empty" class="empty">Waiting for the response service…</p>
         <footer class="panel-footer"><span id="response-count">Loading requests…</span><span>Latest 500 requests · filters apply to this window</span></footer>
-        <div class="panel-heading"><div><h2>Response audit history</h2><p>Latest 500 decisions and execution results. Select a request ID for details.</p></div></div>
+        <div class="panel-heading"><div><h2>Response audit history</h2><p>Latest 500 decisions and execution results. Select a request ID for details.</p></div><label class="search compact"><span aria-hidden="true">⌕</span><input id="audit-search" type="search" placeholder="Filter audit…" aria-label="Filter audit history"></label></div>
         <div id="response-audit" class="log-list"></div>
       </section>
 
       <section id="view-rules" class="view" aria-label="Detection rules" hidden>
-        <div class="panel-heading standalone"><div><h2>Detection library</h2><p>Compiled defaults from the installed binary. Custom service overrides appear under Collectors.</p></div><label class="search"><span aria-hidden="true">⌕</span><input id="rule-search" type="search" placeholder="Search the rule library…" aria-label="Search rules"></label></div>
-        <p class="subtle">Rule YAML is viewable below. Restart collectors after replacing the executable so running defaults match this inventory.</p>
+        <div class="panel-heading standalone"><div><h2>Detection library</h2><p>Compiled defaults from the installed binary. Custom service overrides appear under Collectors.</p></div><div class="inline-filters"><label class="search"><span aria-hidden="true">⌕</span><input id="rule-search" type="search" placeholder="Search the rule library…" aria-label="Search rules"></label><label><span class="sr-only">Rule severity</span><select id="rule-severity"><option value="">All severities</option><option value="critical">Critical</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label><label><span class="sr-only">Rule state</span><select id="rule-state"><option value="">Enabled &amp; disabled</option><option value="enabled">Enabled only</option><option value="disabled">Disabled only</option><option value="firing">Firing in last 24h</option></select></label></div></div>
+        <p class="subtle"><span id="rule-count">—</span> · Rule YAML is viewable below. Restart collectors after replacing the executable so running defaults match this inventory.</p>
         <div id="rule-grid" class="rule-grid"></div>
         <div id="rules-empty" class="empty" hidden><h3>No rules to display</h3><p>Check the rule source diagnostic or adjust your search.</p></div>
       </section>
 
       <section id="view-collectors" class="view" aria-label="Collectors" hidden>
         <div class="panel-heading standalone"><div><h2>Service status</h2><p>Systemd state for this endpoint. Review diagnostics alongside the service state.</p></div></div>
+        <div id="service-summary" class="health" role="status"></div>
         <div id="service-grid" class="service-grid"></div>
         <div class="note">An active service is not proof of complete telemetry. Polling can miss short activity; SSH parsing and journal access can limit detection.</div>
       </section>
 
       <section id="view-logs" class="panel view" aria-label="Diagnostics" hidden>
         <div class="panel-heading"><div><h2>Collector diagnostics</h2><p>Latest 100 journal records from collectors and the response worker, within the last 24 hours.</p></div></div>
-        <div class="filters"><label class="search"><span aria-hidden="true">⌕</span><input id="log-search" type="search" placeholder="Search diagnostic messages…" aria-label="Search diagnostics"></label></div>
+        <div class="filters"><label class="search"><span aria-hidden="true">⌕</span><input id="log-search" type="search" placeholder="Search diagnostic messages…" aria-label="Search diagnostics"></label><label><span class="sr-only">Unit</span><select id="log-unit"><option value="">All units</option><option value="chompedr-ssh.service">SSH</option><option value="chompedr-processes.service">Processes</option><option value="chompedr-files.service">Files</option><option value="chompedr-response.service">Responses</option></select></label><label class="toggle"><input id="log-problems" type="checkbox"> Problems only</label><label class="toggle"><input id="log-hide-alerts" type="checkbox"> Hide alert records</label></div>
         <div id="log-list" class="log-list"></div>
+        <footer class="panel-footer"><span id="log-count">—</span><span>Problem lines mention errors, failures, denials or warnings</span></footer>
       </section>
       <footer class="page-footer"><span><span class="dot muted"></span> Single endpoint · <span id="footer-host">—</span></span><span id="updated">Waiting for first snapshot</span></footer>
     </main>
   </div>
-  <dialog id="detail" aria-labelledby="detail-title"><div class="dialog-heading"><div><div class="eyebrow" id="detail-label">EVENT DETAIL</div><h2 id="detail-title">Detection</h2></div><button id="close-detail" class="button" aria-label="Close detail">✕</button></div><pre id="detail-content"></pre></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="detail" aria-labelledby="detail-title"><div class="dialog-heading"><div><div class="eyebrow" id="detail-label">EVENT DETAIL</div><h2 id="detail-title">Detection</h2></div><div class="dialog-tools"><button id="copy-detail" class="button">Copy</button><button id="close-detail" class="button" aria-label="Close detail">✕</button></div></div><dl id="detail-summary" class="detail-summary" hidden></dl><div id="detail-actions" class="detail-actions" hidden></div><pre id="detail-content"></pre></dialog>
+  <dialog id="shortcuts" aria-labelledby="shortcuts-title"><div class="dialog-heading"><div><div class="eyebrow">HELP</div><h2 id="shortcuts-title">Keyboard shortcuts</h2></div><button id="close-shortcuts" class="button" aria-label="Close shortcuts">✕</button></div>
+    <dl class="shortcut-list">
+      <div><dt><kbd>1</kbd>–<kbd>5</kbd></dt><dd>Switch between Alerts, Responses, Rules, Collectors and Diagnostics</dd></div>
+      <div><dt><kbd>/</kbd></dt><dd>Focus the search box of the current view</dd></div>
+      <div><dt><kbd>r</kbd></dt><dd>Refresh now</dd></div>
+      <div><dt><kbd>p</kbd></dt><dd>Pause or resume automatic refresh</dd></div>
+      <div><dt><kbd>x</kbd></dt><dd>Clear all alert filters</dd></div>
+      <div><dt><kbd>h</kbd></dt><dd>Show only high and critical alerts</dd></div>
+      <div><dt><kbd>Esc</kbd></dt><dd>Close a dialog or leave a search box</dd></div>
+      <div><dt><kbd>?</kbd></dt><dd>Show this help</dd></div>
+    </dl>
+  </dialog>
 </body>
 </html>
